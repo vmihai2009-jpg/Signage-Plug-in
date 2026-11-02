@@ -48,7 +48,7 @@ namespace BGSignage.Engine.UI
         // Main areas
         PreviewCanvas _preview;
         TextBox _editor;
-        TextBlock _editorHint, _status, _pointer;
+        TextBlock _editorHint, _status, _pointer, _timingText;
         ListBox _elements;
         StackPanel _positionPanel;
         TabControl _tabs;
@@ -115,6 +115,10 @@ namespace BGSignage.Engine.UI
             _pointer = new TextBlock { Margin = new Thickness(8, 4, 8, 0), Foreground = Ui.Muted, Width = 160 };
             DockPanel.SetDock(_pointer, Dock.Right);
             statusBar.Children.Add(_pointer);
+            _timingText = new TextBlock { Margin = new Thickness(8, 4, 8, 0), Foreground = Ui.Muted, FontSize = 11,
+                                          ToolTip = "How long the last redraw took (milliseconds). Send this if the designer feels slow." };
+            DockPanel.SetDock(_timingText, Dock.Right);
+            statusBar.Children.Add(_timingText);
             _status = new TextBlock { Margin = new Thickness(8, 4, 8, 0), Foreground = Ui.Header, TextTrimming = TextTrimming.CharacterEllipsis };
             statusBar.Children.Add(_status);
             DockPanel.SetDock(statusBar, Dock.Bottom);
@@ -177,11 +181,11 @@ namespace BGSignage.Engine.UI
             bar.Children.Add(Ui.Button("Delete", "Delete the selected element (Delete key in the preview)", (s, e) => DeleteSelected()));
             bar.Children.Add(Sep());
             _view3d = new ToggleButton { Content = "3D view", ToolTip = "Show depth, stand-off and shadows", Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 4, 0) };
-            _view3d.Click += (s, e) => { _preview.ThreeD = _view3d.IsChecked == true; _preview.InvalidateVisual(); };
+            _view3d.Click += (s, e) => { _preview.ThreeD = _view3d.IsChecked == true; _preview.Redraw(); };
             bar.Children.Add(_view3d);
             bar.Children.Add(Ui.Button("Fit", "Zoom to the whole sign", (s, e) => _preview.FitToView()));
             var grid = new CheckBox { Content = "Grid", IsChecked = _settings.ShowGrid, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 6, 0) };
-            grid.Click += (s, e) => { _settings.ShowGrid = _preview.ShowGrid = grid.IsChecked == true; _settings.Save(); _preview.InvalidateVisual(); };
+            grid.Click += (s, e) => { _settings.ShowGrid = _preview.ShowGrid = grid.IsChecked == true; _settings.Save(); _preview.Redraw(); };
             bar.Children.Add(grid);
             var snap = new CheckBox { Content = "Snap", IsChecked = _settings.SnapToGrid, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0),
                                       ToolTip = "Snap to the grid: dragged elements land on gridlines and the arrow keys move one grid step" };
@@ -196,7 +200,7 @@ namespace BGSignage.Engine.UI
                 if (gridSize.SelectedIndex < 0) return;
                 _settings.GridMm = _preview.GridMm = GridSizes[gridSize.SelectedIndex];
                 _settings.Save();
-                _preview.InvalidateVisual();
+                _preview.Redraw();
             };
             bar.Children.Add(gridSize);
             bar.Children.Add(Sep());
@@ -227,6 +231,8 @@ namespace BGSignage.Engine.UI
             _preview.DragStarted += id => StartDrag(id);
             _preview.Dragging += (id, dx, dy) => DragTo(id, dx, dy);
             _preview.DragEnded += EndDrag;
+            _preview.ZoomChanged += () => { if (PreviewTolerance() != _tolerance) ScheduleRebuild(); };
+            _preview.Drawn += ShowTiming;
             _preview.PointerMoved += p => _pointer.Text = $"x {p.X:0}  y {p.Y:0} mm";
             _preview.KeyDown += OnPreviewKey;
             var frame = new Border { BorderBrush = Ui.Border, BorderThickness = new Thickness(1), Child = _preview };
@@ -296,7 +302,7 @@ namespace BGSignage.Engine.UI
             _selId = id;
             _preview.SelectedId = id;
             _preview.MultiIds = _multi;
-            _preview.InvalidateVisual();
+            _preview.RefreshSelection();
             LoadEditor();
             RefreshAllPanels();
             SyncElementList();
@@ -356,18 +362,45 @@ namespace BGSignage.Engine.UI
         }
 
         /// <summary>Lays the sign out again and redraws everything that depends on it.</summary>
+        double _tolerance = 1;
+
+        /// <summary>
+        /// How closely the preview follows curves: about half a screen pixel, never finer than 0.3 mm. The
+        /// family itself is always built at full precision.
+        /// </summary>
+        double PreviewTolerance()
+        {
+            double t = 0.5 / Math.Max(_preview?.Zoom ?? 0.4, 1e-3);
+            return t <= 0.3 ? 0.3 : t <= 1 ? 1 : t <= 3 ? 3 : 8;
+        }
+
         void Rebuild(bool refreshPanels)
         {
-            try { _geometry = SignBuilder.Build(_doc, WpfFontProvider.Instance, 0.3); }
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            _tolerance = PreviewTolerance();
+            try { _geometry = SignBuilder.Build(_doc, WpfFontProvider.Instance, _tolerance); }
             catch (Exception ex) { _status.Text = "Could not lay out the sign: " + ex.Message; return; }
+            long layoutMs = clock.ElapsedMilliseconds;
             _preview.SelectedId = _selId;
             _preview.Show(_doc, _geometry);
+            long previewMs = clock.ElapsedMilliseconds - layoutMs;
             SyncElementList();
             if (refreshPanels) RefreshAllPanels();
+            long panelsMs = clock.ElapsedMilliseconds - layoutMs - previewMs;
             var r = _geometry.PanelRect;
             _status.Text = _geometry.Warnings.Count > 0
                 ? "⚠ " + string.Join("  ", _geometry.Warnings.Take(3))
                 : $"{_doc.Name}: {r.Width:0} × {r.Height:0} mm, {_geometry.Pieces.Count} solids";
+            _timing = $"layout {layoutMs} · preview {previewMs} · panels {panelsMs} ms";
+            ShowTiming();
+        }
+
+        string _timing = "";
+
+        /// <summary>Times of the last redraw, bottom right, so a slow step can be reported.</summary>
+        void ShowTiming()
+        {
+            if (_timingText != null) _timingText.Text = _timing + $" · draw {_preview.LastDrawMs} ms";
         }
 
         void RefreshAllPanels()
@@ -419,7 +452,8 @@ namespace BGSignage.Engine.UI
         {
             if (_rebuildPending) return;
             _rebuildPending = true;
-            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+            // Render priority: runs before the next screen update (Background could wait for Revit to go idle).
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() =>
             {
                 _rebuildPending = false;
                 Rebuild(false);
@@ -521,6 +555,8 @@ namespace BGSignage.Engine.UI
             }
             _dragOrigin = new Dictionary<string, (double, double)>();
             foreach (var g in group) { var p = PositionOf(g); if (p != null) _dragOrigin[g] = p.Value; }
+            // What is dragged slides on its own layer; the rest of the sign is not redrawn until the drag ends.
+            _preview.BeginLive(_dragOrigin.Keys);
         }
 
         void DragTo(string id, double dx, double dy)
@@ -545,12 +581,13 @@ namespace BGSignage.Engine.UI
                 var cur = PositionOf(kv.Key);
                 if (cur != null) MoveBy(kv.Key, kv.Value.X + mx - cur.Value.X, kv.Value.Y + my - cur.Value.Y);
             }
-            ScheduleRebuild(); // the Position panel catches up when the drag ends
+            _preview.SetLiveOffset(mx, my); // the sign is rebuilt, and the Position panel catches up, when the drag ends
         }
 
         void EndDrag()
         {
             _dragOrigin = null;
+            _preview.EndLive();
             Rebuild(false);
             _loading = true;
             try { BuildPositionPanel(); } finally { _loading = false; }

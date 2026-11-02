@@ -3,7 +3,7 @@
 <img src="docs/icon.png" width="96" align="right" alt="BG Signage icon">
 
 A Revit add-in for designing reception and wayfinding signs with InDesign-style type tools and a live preview,
-then turning them into **parametric, wall-based Revit families**. It sits on the **Barr Gazetas** ribbon tab, in a
+then turning them into **parametric, face-based Revit families (they snap to walls, columns, floors, ceilings or any other face)**. It sits on the **Barr Gazetas** ribbon tab, in a
 **Signage** panel, next to the other BG tools.
 
 Works in **Revit 2024, 2025 and 2026**. New versions install from the **Updater** button without restarting Revit.
@@ -43,7 +43,7 @@ The window has four areas:
 - **Left – Elements and Sign.** The list of text frames, rules (bars/rails) and graphics; the family name;
   the backpanel (on/off, rectangle or ellipse, fixed size or *fit to content + padding*, corner radius);
   construction (panel thickness, letter depth, letter stand-off, rule depth, rule stand-off); the four materials
-  (Panel, Letters, Accent, Rules); how the family is hosted (**wall based** by default); the family **sizes**; and
+  (Panel, Letters, Accent, Rules); how the family is hosted (**face based** by default); the family **sizes**; and
   **Scale whole sign** (resize the whole design by a percentage, with or without the thicknesses).
 - **Middle – Preview.** Live as you type. **3D view** shows depth, stand-off and shadows. Click to select,
   **drag to move any element** (Shift = 10 mm steps, Ctrl = straight, **Alt = drag a copy**), arrow keys nudge by
@@ -101,11 +101,15 @@ them out). Very large or tiny drawings are scaled to about a third of the sign; 
 ## The Revit family
 
 **Export to Revit** builds `<Family name>.rfa` (in *Documents\BG Signage* unless you choose another folder),
-loads it into the project and starts placing it (untick *Place after export* to only load it).
+loads it into the project and starts placing it (untick *Place after export* to only load it). The designer
+minimises itself so your clicks go to Revit; **Sign Designer** on the ribbon brings it back.
 
-- **Wall based** (default): click a wall. Set the height with *Elevation from Level* (with the default insertion
-  point this is the centre of the sign). The flip arrows put it on the other face. Face based and freestanding are
-  also available.
+- **Face based** (default): snaps to whichever face you click: a wall, column, floor, ceiling, soffit or a face in a
+  linked model. In a 3D view or elevation just click the face. In a plan, choose **Place on Vertical Face** on the
+  *Modify | Place* ribbon and click a wall. The point you click is the sign's insertion point (its centre by default,
+  see *Insertion point*).
+- **Wall based**: walls only. Set the height with *Elevation from Level*; the flip arrows move it to the other side.
+- **Freestanding**: stands on the work plane.
 - Category: **Signage**.
 - One solid per letter, logo shape and rule, plus the backpanel, all driven by **type parameters**
   (Edit Type in Revit):

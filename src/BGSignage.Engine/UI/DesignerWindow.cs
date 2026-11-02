@@ -54,6 +54,7 @@ namespace BGSignage.Engine.UI
             if (_open != null && _open.IsLoaded)
             {
                 if (sign != null) _open.Load(sign, "Opened from the model");
+                if (_open.WindowState == WindowState.Minimized) _open.WindowState = WindowState.Normal;
                 _open.Activate();
                 return;
             }
@@ -61,6 +62,9 @@ namespace BGSignage.Engine.UI
             _open.Closed += (s, e) => _open = null;
             _open.Show();
         }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool SetForegroundWindow(IntPtr hWnd);
 
         DesignerWindow(UIApplication ui, SignDocument sign, List<MaterialRef> materials)
         {
@@ -639,8 +643,16 @@ namespace BGSignage.Engine.UI
                 string msg;
                 try { msg = SignExporter.Export(app, sign, folder, place); }
                 catch (Exception ex) { msg = "Export failed: " + ex.Message; }
-                Dispatcher.BeginInvoke(new Action(() => _status.Text = msg.Split('\n')[0]));
-                if (!place || msg.StartsWith("Export failed")) TaskDialog.Show("BG Signage", msg);
+                bool failed = msg.StartsWith("Export failed");
+                _status.Text = failed ? msg.Split('\n')[0] : msg.Split('\n')[0] + " " + SignExporter.PlacementHint(sign.Build.Hosting);
+                if (place && !failed)
+                {
+                    // Get out of the way so the clicks go to Revit's view: the designer sits on top of Revit.
+                    // Sign Designer on the ribbon brings it back.
+                    WindowState = WindowState.Minimized;
+                    try { SetForegroundWindow(app.MainWindowHandle); } catch { }
+                }
+                else TaskDialog.Show("BG Signage", msg);
             });
         }
     }

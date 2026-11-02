@@ -257,9 +257,30 @@ namespace BGSignage.Engine.RevitExport
         {
             faceY = 0; outward = -1;
             var wall = new FilteredElementCollector(fam).OfClass(typeof(Wall)).FirstElement();
-            var bb = wall?.get_BoundingBox(null);
+            if (wall == null) return;
+            // The wall's two big faces (normals along Y). The sign goes on the one on the host reference plane
+            // (Y = 0 in Autodesk's templates), facing out of the wall: never inside it or on its far side.
+            var faces = new List<(double Y, double Normal)>();
+            var geo = wall.get_Geometry(new Options { ComputeReferences = false, DetailLevel = ViewDetailLevel.Fine });
+            if (geo != null)
+                foreach (var obj in geo)
+                {
+                    var solids = obj is GeometryInstance gi ? gi.GetInstanceGeometry().OfType<Solid>() : new[] { obj as Solid };
+                    foreach (var solid in solids.Where(s => s != null && s.Faces.Size > 0))
+                        foreach (Face f in solid.Faces)
+                            if (f is PlanarFace pf && Math.Abs(pf.FaceNormal.Y) > 0.99)
+                                faces.Add((pf.Origin.Y, Math.Sign(pf.FaceNormal.Y)));
+                }
+            if (faces.Count > 0)
+            {
+                // Prefer the face at Y = 0; between faces equally near, the one facing -Y (the template's Front view).
+                var best = faces.OrderBy(f => Math.Round(Math.Abs(f.Y), 6)).ThenBy(f => f.Normal).First();
+                faceY = best.Y; outward = best.Normal;
+                return;
+            }
+            var bb = wall.get_BoundingBox(null);
             if (bb == null) return;
-            if (bb.Max.Y <= 1e-6) { faceY = bb.Max.Y; outward = 1; }  // wall behind on -Y: face out along +Y
+            if (bb.Max.Y <= 1e-6) { faceY = bb.Max.Y; outward = 1; }
             else { faceY = Math.Abs(bb.Min.Y) < 1e-3 ? 0 : bb.Min.Y; outward = -1; }
         }
 

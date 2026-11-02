@@ -50,11 +50,16 @@ namespace BGSignage.Engine.RevitExport
             if (built.TypeNames.Count > 1)
                 lines.Add($"Sizes (family types): {string.Join(", ", built.TypeNames)}. Change the type to resize a placed sign.");
             if (built.Warnings.Count > 0) lines.Add("\nNotes:\n• " + string.Join("\n• ", built.Warnings.Distinct().Take(8)));
-            if (place) lines.Add(sign.Build.Hosting == Hosting.WallBased
-                ? "\nClick a wall to place it. Set its height with \"Elevation from Level\"; the arrows flip it to the other face."
-                : sign.Build.Hosting == Hosting.FaceBased ? "\nClick a face (wall, column...) to place it." : "\nClick to place it.");
+            if (place) lines.Add("\n" + PlacementHint(sign.Build.Hosting));
             return string.Join("\n", lines);
         }
+
+        public static string PlacementHint(Hosting hosting) =>
+            hosting == Hosting.FaceBased
+                ? "To place it: in a 3D view or an elevation click the face; in a plan pick \"Place on Vertical Face\" (Modify | Place ribbon) and click a wall. The click point is the sign's insertion point."
+                : hosting == Hosting.WallBased
+                    ? "To place it: click a wall. Set its height with \"Elevation from Level\"; the flip arrows move it to the other side."
+                    : "To place it: click in the view (it stands on the work plane).";
 
         sealed class OverwriteFamily : IFamilyLoadOptions
         {

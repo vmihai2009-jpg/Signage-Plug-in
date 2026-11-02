@@ -90,9 +90,9 @@ namespace BGSignage.Engine.UI
             p.Children.Add(Ui.Note("Pick a project material or type a new name. The swatch sets the preview colour (and the colour of a new material)."));
 
             p.Children.Add(Ui.Title("Revit family"));
-            _hosting = Ui.Combo("Wall based", "Face based", "Freestanding");
+            _hosting = Ui.Combo("Wall based (walls only)", "Face based (any wall, floor, ceiling, face)", "Freestanding (work plane)");
             _hosting.SelectionChanged += (s, e) => { if (!_loading) Change(() => _doc.Build.Hosting = (Hosting)_hosting.SelectedIndex); };
-            p.Children.Add(Ui.Labelled("Hosting", _hosting, "Wall based: placed on a wall and moves with it. Face based: on any face. Freestanding: anywhere."));
+            p.Children.Add(Ui.Labelled("Hosting", _hosting, "Face based (recommended): snaps to any face, such as a wall, column, floor, ceiling or soffit, and moves with it. Wall based: walls only. Freestanding: on a work plane."));
             _origin = Ui.Combo("Centre", "Bottom centre", "Bottom left", "Top left");
             _origin.SelectionChanged += (s, e) => { if (!_loading) Change(() => _doc.Build.Origin = (OriginPoint)_origin.SelectedIndex); };
             p.Children.Add(Ui.Labelled("Insertion point", _origin, "The family's insertion point on the sign. With Centre, the Elevation in Revit is the centre height."));

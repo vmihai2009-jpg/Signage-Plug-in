@@ -37,7 +37,7 @@ namespace BGSignage.Core.Model
     {
         [OnDeserializing] void SetDefaults(StreamingContext _) => Defaults.Apply(this, new SignDocument());
 
-        public const int CurrentVersion = 1;
+        public const int CurrentVersion = 2;
 
         [DataMember(Order = 0)] public int Version { get; set; } = CurrentVersion;
         [DataMember(Order = 1)] public string Name { get; set; } = "Reception Sign";
@@ -53,6 +53,9 @@ namespace BGSignage.Core.Model
             if (string.IsNullOrWhiteSpace(Name)) Name = "Sign";
             Panel = Panel ?? new BackPanel();
             Build = Build ?? new Construction();
+            // Version 1 made wall-based families by default; face based (any wall, floor, ceiling...) replaced it.
+            if (Version < 2 && Build.Hosting == Hosting.WallBased) Build.Hosting = Hosting.FaceBased;
+            Version = CurrentVersion;
             Build.Normalise();
             Frames = Frames ?? new List<TextFrame>();
             Rules = Rules ?? new List<RuleElement>();
@@ -119,7 +122,7 @@ namespace BGSignage.Core.Model
         [DataMember(Order = 6)] public MaterialRef LetterMaterial { get; set; } = new MaterialRef("BG Sign - Lettering", 40, 40, 40);
         [DataMember(Order = 7)] public MaterialRef AccentMaterial { get; set; } = new MaterialRef("BG Sign - Accent", 176, 125, 72);
         [DataMember(Order = 8)] public MaterialRef RuleMaterial { get; set; } = new MaterialRef("BG Sign - Rules", 150, 120, 70);
-        [DataMember(Order = 9)] public Hosting Hosting { get; set; } = Hosting.WallBased;
+        [DataMember(Order = 9)] public Hosting Hosting { get; set; } = Hosting.FaceBased;
         [DataMember(Order = 10)] public OriginPoint Origin { get; set; } = OriginPoint.Center;
         /// <summary>
         /// Sizes the family is built in, in % of the design (100 = as drawn). Each becomes a family type, e.g.

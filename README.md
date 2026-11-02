@@ -47,8 +47,9 @@ The window has four areas:
 - **Left – Layers and Sign.** The list of text frames, rules (bars/rails) and graphics, each with a **padlock**
   (locked layers can't be picked, moved or deleted in the preview; select them in the list to edit them); the family name;
   the backpanel (on/off, rectangle or ellipse, fixed size or *fit to content + padding*, corner radius);
-  construction (panel thickness, letter depth, letter stand-off, rule depth, rule stand-off); the four materials
-  (Panel, Letters, Accent, Rules); how the family is hosted (**face based** by default); the family **sizes**; and
+  the **Material** of whatever is selected (its own project material and preview colour; text also shows its
+  accent characters and paragraph rules when it has any; nothing selected = the backpanel);
+  construction (panel thickness, letter depth, letter stand-off, rule depth, rule stand-off); how the family is hosted (**face based** by default); the family **sizes**; and
   **Scale whole sign** (resize the whole design by a percentage, with or without the thicknesses).
 - **Middle – Preview.** Live as you type. **3D view** shows depth, stand-off and shadows. Click to select,
   **drag to move any element** (**Shift = straight** across or up/down like InDesign, Ctrl = 10 mm steps, **Alt = drag a copy**), arrow keys nudge by
@@ -90,6 +91,14 @@ Exact X / Y, frame width (Auto = no wrapping), rotation, rule length and angle (
 or vertical bars), graphic scale / width / mirror, and *Centre on panel* buttons. Sign coordinates are in mm from
 the top-left of the backpanel; a frame's Y is the top of the capitals of its first line, so frames line up easily.
 
+### Symbols
+
+**+ Symbol ▾** adds a line pictogram: toilets, male, female, accessible, baby change, people, person, lift, stairs,
+bicycle, bins, café and arrows. They behave like graphics (scale, rotate, mirror, material); the line weight
+scales with them.
+
+<img src="docs/symbols.png" width="600" alt="Symbols">
+
 ### Graphics (logos)
 
 **+ Graphic…** imports artwork:
@@ -124,8 +133,9 @@ minimises itself so your clicks go to Revit; **Sign Designer** on the ribbon bri
 |---|---|
 | `BG_Has_Backpanel` | Yes/No – lettering on a panel, or straight onto the wall. Letters move back to the wall automatically. |
 | `BG_Panel_Thickness`, `BG_Panel_Material` | |
-| `BG_Letter_Depth`, `BG_Letter_Standoff`, `BG_Letter_Material`, `BG_Accent_Material` | Stand-off = gap behind the letters (pins). |
-| `BG_Show_Rules`, `BG_Rule_Depth`, `BG_Rule_Standoff`, `BG_Rule_Material` | |
+| `BG Material - <layer>` | One per layer (plus `(accent)` / `(rules)` for text that has them), so every layer's material can be changed in Revit. |
+| `BG_Letter_Depth`, `BG_Letter_Standoff` | Stand-off = gap behind the letters (pins). |
+| `BG_Show_Rules`, `BG_Rule_Depth`, `BG_Rule_Standoff` | |
 | `BG_Sign_Text`, `BG_Sign_Width`, `BG_Sign_Height` | For schedules. |
 | `BG_Sign_Data` | The design itself, so **Edit Sign** can reopen it. Don't edit by hand. |
 

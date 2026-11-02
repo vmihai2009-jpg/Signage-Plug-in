@@ -79,7 +79,7 @@ namespace BGSignage.Core.Editing
 
             foreach (var g in doc.Graphics)
             {
-                g.X = S(g.X); g.Y = S(g.Y); g.ScalePercent = S(g.ScalePercent); g.StrokeMm = S(g.StrokeMm);
+                g.X = S(g.X); g.Y = S(g.Y); g.ScalePercent = S(g.ScalePercent); if (!g.StrokeScales) g.StrokeMm = S(g.StrokeMm);
             }
         }
     }

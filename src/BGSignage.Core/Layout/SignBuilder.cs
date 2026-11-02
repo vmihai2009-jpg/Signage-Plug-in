@@ -95,13 +95,26 @@ namespace BGSignage.Core.Layout
             foreach (var island in Islands(closed))
                 g.Pieces.Add(new Piece { Role = role, Material = e.Material, Label = e.Name, ElementId = e.Id, Loops = island });
             if (e.StrokeMm > 0)
+            {
+                double w = e.StrokeScales ? e.StrokeMm * Math.Max(e.ScalePercent, 0.01) / 100 : e.StrokeMm;
                 foreach (var path in e.Paths.Where(p => !p.Closed))
                 {
                     var pts = t.Apply(path.ToVec2());
                     for (int i = 0; i + 1 < pts.Length; i++)
-                        if (Vec2.Dist(pts[i], pts[i + 1]) > 1e-6)
-                            g.Pieces.Add(new Piece { Role = role, Material = e.Material, Label = e.Name + " line", ElementId = e.Id, Loops = { Polygons.Bar(pts[i], pts[i + 1], e.StrokeMm) } });
+                    {
+                        var a = pts[i]; var b = pts[i + 1];
+                        double len = Vec2.Dist(a, b);
+                        if (len <= 1e-6) continue;
+                        if (e.StrokeScales)
+                        {
+                            // Square ends half a line weight long, so corners close up cleanly.
+                            var ext = (b - a) * (w / 2 / len);
+                            a = a - ext; b = b + ext;
+                        }
+                        g.Pieces.Add(new Piece { Role = role, Material = e.Material, Label = e.Name + " line", ElementId = e.Id, Loops = { Polygons.Bar(a, b, w) } });
+                    }
                 }
+            }
             var box = t.Apply(Polygons.Rectangle(0, 0, Math.Max(e.NativeWidth, 1), Math.Max(e.NativeHeight, 1)));
             g.ElementBoxes[e.Id] = box;
         }

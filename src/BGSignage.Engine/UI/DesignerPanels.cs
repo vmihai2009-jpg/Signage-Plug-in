@@ -19,7 +19,7 @@ namespace BGSignage.Engine.UI
         ComboBox _shape, _hosting, _origin;
         TextBox _familySizes;
         NumberField _panelW, _panelH, _padX, _padY, _radius, _panelT, _letterD, _letterS, _ruleD, _ruleS;
-        readonly List<(MaterialSlot? Slot, ComboBox Name, Button Swatch)> _materialRows = new List<(MaterialSlot?, ComboBox, Button)>();
+        StackPanel _materialPanel;
 
         // Character panel
         ComboBox _font, _style, _kerning, _charMaterial;
@@ -50,6 +50,10 @@ namespace BGSignage.Engine.UI
             };
             p.Children.Add(_elements);
             p.Children.Add(Ui.Note("Click an element in the preview or here; drag it in the preview to move it (Shift = straight across or up/down, Ctrl = 10 mm steps, Alt = drag a copy), or nudge with the arrow keys. Drag on an empty part of the preview to select several (Shift-click adds or removes; Ctrl-click in this list too). Tick Snap on the toolbar to land on the grid. The padlock locks a layer so it can't be picked or moved in the preview."));
+
+            p.Children.Add(Ui.Title("Material"));
+            _materialPanel = new StackPanel();
+            p.Children.Add(_materialPanel);
 
             p.Children.Add(Ui.Title("Sign"));
             _signName = new TextBox();
@@ -85,12 +89,6 @@ namespace BGSignage.Engine.UI
             _ruleS = Num("Stand-off", "mm", v => _doc.Build.RuleStandoff = v, 1, 0, 2000, 1, "Gap behind rules and rails");
             p.Children.Add(Ui.Pair(_ruleD, _ruleS));
 
-            p.Children.Add(Ui.Title("Materials"));
-            p.Children.Add(MaterialRow("Panel", null));
-            p.Children.Add(MaterialRow("Letters", MaterialSlot.Letters));
-            p.Children.Add(MaterialRow("Accent", MaterialSlot.Accent));
-            p.Children.Add(MaterialRow("Rules", MaterialSlot.Rules));
-            p.Children.Add(Ui.Note("Pick a project material or type a new name. The swatch sets the preview colour (and the colour of a new material)."));
 
             p.Children.Add(Ui.Title("Revit family"));
             _hosting = Ui.Combo("Wall based (walls only)", "Face based (any wall, floor, ceiling, face)", "Freestanding (work plane)");
@@ -149,19 +147,63 @@ namespace BGSignage.Engine.UI
             return n;
         }
 
-        UIElement MaterialRow(string label, MaterialSlot? slot)
+        /// <summary>
+        /// The Material section shows only what is selected: the layer's material (and, for text, its accent
+        /// characters and paragraph rules when it has any), or the backpanel when nothing is selected.
+        /// </summary>
+        void RefreshMaterialPanel()
         {
-            var combo = new ComboBox { IsEditable = true, MinHeight = 24, IsTextSearchEnabled = true };
-            foreach (var m in _projectMaterials) combo.Items.Add(m.Name);
-            var swatch = new Button { Width = 24, Height = 22, Margin = new Thickness(4, 0, 0, 0), ToolTip = "Preview colour" };
-            MaterialRef Get() => slot == null ? _doc.Build.PanelMaterial : _doc.Build.For(slot.Value);
-            void Set(MaterialRef m)
+            if (_materialPanel == null) return;
+            _materialPanel.Children.Clear();
+            var ids = _multi.Count > 0 ? _multi.ToList() : (_selId != null ? new List<string> { _selId } : new List<string>());
+            MaterialSlot MainSlot(string id) =>
+                _doc.Rules.FirstOrDefault(r => r.Id == id)?.Material ?? _doc.Graphics.FirstOrDefault(g => g.Id == id)?.Material ?? MaterialSlot.Letters;
+            string Kind(string id) => _doc.Frames.Any(f => f.Id == id) ? "text" : _doc.Rules.Any(r => r.Id == id) ? "rule" : "graphic";
+            string NameOf(string id) => _doc.Frames.FirstOrDefault(f => f.Id == id)?.Name ?? _doc.Rules.FirstOrDefault(r => r.Id == id)?.Name ?? _doc.Graphics.FirstOrDefault(g => g.Id == id)?.Name ?? "";
+
+            if (ids.Count == 0)
             {
-                if (slot == null) _doc.Build.PanelMaterial = m;
-                else if (slot == MaterialSlot.Accent) _doc.Build.AccentMaterial = m;
-                else if (slot == MaterialSlot.Rules) _doc.Build.RuleMaterial = m;
-                else _doc.Build.LetterMaterial = m;
+                _materialPanel.Children.Add(Ui.Note("Backpanel"));
+                _materialPanel.Children.Add(MaterialRow("Panel", () => _doc.Build.PanelMaterial, m => _doc.Build.PanelMaterial = m));
+                _materialPanel.Children.Add(Ui.Note("Click a layer in the preview or the list to see its material."));
+                return;
             }
+            if (ids.Count > 1)
+            {
+                _materialPanel.Children.Add(Ui.Note($"{ids.Count} layers selected: a change applies to all of them."));
+                _materialPanel.Children.Add(MaterialRow("Material", () => _doc.MaterialFor(_selId ?? ids[0], MainSlot(_selId ?? ids[0])),
+                    m => { foreach (var i in ids) _doc.SetMaterial(i, MainSlot(i), m.Clone()); }));
+                return;
+            }
+            string id = ids[0];
+            _materialPanel.Children.Add(Ui.Note($"{NameOf(id)} ({Kind(id)})"));
+            var frame = _doc.Frames.FirstOrDefault(f => f.Id == id);
+            if (frame != null)
+            {
+                _materialPanel.Children.Add(MaterialRow("Letters", () => _doc.MaterialFor(id, MaterialSlot.Letters), m => _doc.SetMaterial(id, MaterialSlot.Letters, m)));
+                if (frame.ExpandFormats().Any(c => c.Material == MaterialSlot.Accent))
+                    _materialPanel.Children.Add(MaterialRow("Accent", () => _doc.MaterialFor(id, MaterialSlot.Accent), m => _doc.SetMaterial(id, MaterialSlot.Accent, m),
+                        "Characters set to Accent in the Character panel"));
+                if (frame.Paragraphs.Any(pa => pa.RuleAbove?.On == true || pa.RuleBelow?.On == true))
+                    _materialPanel.Children.Add(MaterialRow("Rules", () => _doc.MaterialFor(id, MaterialSlot.Rules), m => _doc.SetMaterial(id, MaterialSlot.Rules, m),
+                        "Paragraph rules above or below this text"));
+            }
+            else
+            {
+                var slot = MainSlot(id);
+                _materialPanel.Children.Add(MaterialRow("Material", () => _doc.MaterialFor(id, slot), m => _doc.SetMaterial(id, slot, m)));
+            }
+            _materialPanel.Children.Add(Ui.Note("Pick a project material or type a new name; the swatch is the colour shown here (and given to a new material). Click empty space for the backpanel."));
+        }
+
+        UIElement MaterialRow(string label, Func<MaterialRef> Get, Action<MaterialRef> Set, string tip = null)
+        {
+            var combo = new ComboBox { IsEditable = true, MinHeight = 24, IsTextSearchEnabled = true, ToolTip = tip };
+            foreach (var m in _projectMaterials) combo.Items.Add(m.Name);
+            var swatch = new Button { Width = 24, Height = 22, Margin = new Thickness(4, 0, 0, 0), ToolTip = "Colour shown in the preview (click to change)" };
+            var current = Get();
+            combo.Text = current?.Name ?? "";
+            if (current != null) swatch.Background = new SolidColorBrush(Color.FromRgb(current.R, current.G, current.B));
             void CommitName()
             {
                 if (_loading) return;
@@ -181,7 +223,6 @@ namespace BGSignage.Engine.UI
                     if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
                         Change(() => { var m = cur.Clone(); m.R = dlg.Color.R; m.G = dlg.Color.G; m.B = dlg.Color.B; Set(m); });
             };
-            _materialRows.Add((slot, combo, swatch));
             var d = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
             var l = new TextBlock { Text = label, Width = 56, VerticalAlignment = VerticalAlignment.Center, Foreground = Ui.Header };
             DockPanel.SetDock(l, Dock.Left); d.Children.Add(l);
@@ -206,12 +247,7 @@ namespace BGSignage.Engine.UI
             _hosting.SelectedIndex = (int)_doc.Build.Hosting;
             _origin.SelectedIndex = (int)_doc.Build.Origin;
             if (!_familySizes.IsKeyboardFocusWithin) _familySizes.Text = SizesText(_doc.Build.FamilySizes);
-            foreach (var (slot, combo, swatch) in _materialRows)
-            {
-                var m = slot == null ? _doc.Build.PanelMaterial : _doc.Build.For(slot.Value);
-                combo.Text = m.Name;
-                swatch.Background = new SolidColorBrush(Color.FromRgb(m.R, m.G, m.B));
-            }
+            RefreshMaterialPanel();
         }
 
         // ================================================================== Character

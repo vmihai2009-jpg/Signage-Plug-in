@@ -20,7 +20,7 @@ namespace BGSignage.Engine.UI
     {
         SignGeometry _geometry;
         SignDocument _doc;
-        readonly List<(PieceRole Role, MaterialSlot Slot, Geometry Shape)> _groups = new List<(PieceRole, MaterialSlot, Geometry)>();
+        readonly List<(PieceRole Role, MaterialRef Mat, Geometry Shape)> _groups = new List<(PieceRole, MaterialRef, Geometry)>();
         Geometry _panel;
 
         double _zoom = 0.4;            // screen pixels per mm
@@ -73,14 +73,20 @@ namespace BGSignage.Engine.UI
             _geometry = geometry;
             _groups.Clear();
             _panel = Shape(new[] { geometry.PanelOutline });
-            foreach (var g in geometry.Pieces.GroupBy(p => (p.Role, p.Material)))
+            // One drawing group per role and material: each layer shows in its own material's colour.
+            foreach (var g in geometry.Pieces.GroupBy(p =>
+            {
+                var m = doc.MaterialFor(p.ElementId, p.Material) ?? new MaterialRef("?", 60, 60, 60);
+                return (p.Role, Key: $"{m.Name}|{m.R},{m.G},{m.B}");
+            }))
             {
                 var group = new GeometryGroup { FillRule = FillRule.Nonzero };
                 foreach (var piece in g)
                     foreach (var island in SignBuilder.Islands(piece.Loops))
                         group.Children.Add(Shape(Oriented(island)));
                 group.Freeze();
-                _groups.Add((g.Key.Role, g.Key.Material, group));
+                var first = g.First();
+                _groups.Add((g.Key.Role, doc.MaterialFor(first.ElementId, first.Material), group));
             }
             // Letters on top of rules, rules on top of nothing.
             _groups.Sort((a, b) => Order(a.Role).CompareTo(Order(b.Role)));
@@ -161,7 +167,7 @@ namespace BGSignage.Engine.UI
             {
                 if (panelOn) dc.DrawGeometry(Fill(build.PanelMaterial), new Pen(Fill(build.PanelMaterial, 0.8), 1 / _zoom), _panel);
                 else dc.DrawGeometry(null, Dashed(Color.FromArgb(90, 0, 0, 0)), _panel);
-                foreach (var g in _groups) dc.DrawGeometry(Fill(build.For(g.Slot)), null, g.Shape);
+                foreach (var g in _groups) dc.DrawGeometry(Fill(g.Mat), null, g.Shape);
             }
             else
             {
@@ -203,7 +209,7 @@ namespace BGSignage.Engine.UI
                     bool rule = g.Role == PieceRole.Rule;
                     double back = panelT + (rule ? build.RuleStandoff : build.LetterStandoff);
                     double front = back + Math.Max(rule ? build.RuleDepth : build.LetterDepth, 0.5);
-                    Extrude(g.Shape, build.For(g.Slot), back, front, true);
+                    Extrude(g.Shape, g.Mat, back, front, true);
                 }
             }
 

@@ -117,6 +117,15 @@ namespace BGSignage.Engine.RevitExport
             b.LetterMaterial = Mat(FamilyBuilder.LetterMaterial, b.LetterMaterial);
             b.AccentMaterial = Mat(FamilyBuilder.AccentMaterial, b.AccentMaterial);
             b.RuleMaterial = Mat(FamilyBuilder.RuleMaterial, b.RuleMaterial);
+            // Each layer's own material, as changed in Revit.
+            foreach (var kv in sign.MaterialParameterNames())
+            {
+                var par = symbol.LookupParameter(kv.Value);
+                if (par == null || par.StorageType != StorageType.ElementId || !(doc.GetElement(par.AsElementId()) is Material lm)) continue;
+                var cur = sign.MaterialFor(kv.Key.Id, kv.Key.Slot);
+                sign.SetMaterial(kv.Key.Id, kv.Key.Slot, new MaterialRef(lm.Name,
+                    lm.Color.IsValid ? lm.Color.Red : cur.R, lm.Color.IsValid ? lm.Color.Green : cur.G, lm.Color.IsValid ? lm.Color.Blue : cur.B));
+            }
             var has = symbol.LookupParameter(FamilyBuilder.HasPanel);
             if (has != null && has.StorageType == StorageType.Integer) sign.Panel.Enabled = has.AsInteger() == 1;
             return sign;

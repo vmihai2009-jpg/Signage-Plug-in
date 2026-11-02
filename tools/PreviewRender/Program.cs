@@ -25,6 +25,18 @@ class Program
             File.WriteAllText(Path.Combine(outDir, Slug(name) + ".svg"), Svg(doc, g));
             Console.WriteLine($"{name}: {g.Pieces.Count} pieces, panel {g.PanelRect.Width:0}x{g.PanelRect.Height:0}  {string.Join(" ", g.Warnings)}");
         }
+
+        // The symbol library on one sheet.
+        var sheet = new SignDocument { Name = "Symbols" };
+        sheet.Panel.Enabled = false; sheet.Panel.PaddingX = 30; sheet.Panel.PaddingY = 30;
+        for (int i = 0; i < Symbols.Names.Count; i++)
+        {
+            var sym = Symbols.Create(Symbols.Names[i], 100);
+            sym.X = (i % 6) * 150; sym.Y = (i / 6) * 150;
+            sheet.Graphics.Add(sym);
+        }
+        sheet.Normalise();
+        File.WriteAllText(Path.Combine(outDir, "symbols.svg"), Svg(sheet, SignBuilder.Build(sheet, fonts, 0.3)));
     }
 
     static string Slug(string s) => new string(s.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');

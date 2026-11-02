@@ -70,6 +70,62 @@ namespace BGSignage.Core.Model
             return this;
         }
 
+        /// <summary>
+        /// The material a piece is built in: its layer's own, else the sign's default for that slot. Accent
+        /// characters and paragraph rules in a text layer can have their own too.
+        /// </summary>
+        public MaterialRef MaterialFor(string elementId, MaterialSlot slot)
+        {
+            var b = Build;
+            if (Frames.FirstOrDefault(f => f.Id == elementId) is TextFrame f)
+                return slot == MaterialSlot.Accent ? f.LayerAccentMaterial ?? b.AccentMaterial
+                     : slot == MaterialSlot.Rules ? f.LayerRuleMaterial ?? b.RuleMaterial
+                     : f.LayerMaterial ?? b.LetterMaterial;
+            if (Rules.FirstOrDefault(r => r.Id == elementId) is RuleElement r) return r.LayerMaterial ?? b.For(slot);
+            if (Graphics.FirstOrDefault(g => g.Id == elementId) is GraphicElement g) return g.LayerMaterial ?? b.For(slot);
+            return b.For(slot);
+        }
+
+        public void SetMaterial(string elementId, MaterialSlot slot, MaterialRef m)
+        {
+            foreach (var f in Frames.Where(x => x.Id == elementId))
+            {
+                if (slot == MaterialSlot.Accent) f.LayerAccentMaterial = m;
+                else if (slot == MaterialSlot.Rules) f.LayerRuleMaterial = m;
+                else f.LayerMaterial = m;
+            }
+            foreach (var r in Rules.Where(x => x.Id == elementId)) r.LayerMaterial = m;
+            foreach (var g in Graphics.Where(x => x.Id == elementId)) g.LayerMaterial = m;
+        }
+
+        /// <summary>
+        /// The family's material parameter for each layer (and for accent characters / paragraph rules in a text
+        /// layer), named after the layer, e.g. "BG Material - Name". Stable for the same design, so Edit Sign
+        /// can read them back.
+        /// </summary>
+        public Dictionary<(string Id, MaterialSlot Slot), string> MaterialParameterNames()
+        {
+            var result = new Dictionary<(string, MaterialSlot), string>();
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string Unique(string layer, string suffix)
+            {
+                var clean = new string((layer ?? "Layer").Where(c => "{}[]|;<>?`~:=\\\"".IndexOf(c) < 0).ToArray()).Trim();
+                if (clean.Length == 0) clean = "Layer";
+                string baseName = "BG Material - " + clean + suffix, name = baseName;
+                for (int n = 2; !used.Add(name); n++) name = baseName + " " + n;
+                return name;
+            }
+            foreach (var f in Frames)
+            {
+                result[(f.Id, MaterialSlot.Letters)] = Unique(f.Name, "");
+                result[(f.Id, MaterialSlot.Accent)] = Unique(f.Name, " (accent)");
+                result[(f.Id, MaterialSlot.Rules)] = Unique(f.Name, " (rules)");
+            }
+            foreach (var r in Rules) result[(r.Id, r.Material)] = Unique(r.Name, "");
+            foreach (var g in Graphics) result[(g.Id, g.Material)] = Unique(g.Name, "");
+            return result;
+        }
+
         public bool IsLocked(string id) =>
             id != null && (Frames.Any(f => f.Id == id && f.Locked) || Rules.Any(r => r.Id == id && r.Locked) || Graphics.Any(g => g.Id == id && g.Locked));
 
@@ -295,6 +351,10 @@ namespace BGSignage.Core.Model
         [DataMember(Order = 8)] public List<ParagraphFormat> Paragraphs { get; set; } = new List<ParagraphFormat>();
         /// <summary>Locked: cannot be picked or moved in the preview (still editable from the Elements list).</summary>
         [DataMember(Order = 9)] public bool Locked { get; set; }
+        /// <summary>This layer's own materials (null = the sign's default for letters, accent or rules).</summary>
+        [DataMember(Order = 10)] public MaterialRef LayerMaterial { get; set; }
+        [DataMember(Order = 11)] public MaterialRef LayerAccentMaterial { get; set; }
+        [DataMember(Order = 12)] public MaterialRef LayerRuleMaterial { get; set; }
 
         public int ParagraphCount => (Text ?? "").Count(c => c == '\n') + 1;
 
@@ -384,6 +444,8 @@ namespace BGSignage.Core.Model
         [DataMember(Order = 6)] public double WeightMm { get; set; } = 4;
         [DataMember(Order = 7)] public MaterialSlot Material { get; set; } = MaterialSlot.Rules;
         [DataMember(Order = 8)] public bool Locked { get; set; }
+        /// <summary>This layer's own material (null = the sign's default).</summary>
+        [DataMember(Order = 9)] public MaterialRef LayerMaterial { get; set; }
 
         public RuleElement Clone() => (RuleElement)MemberwiseClone();
     }
@@ -440,6 +502,10 @@ namespace BGSignage.Core.Model
         [DataMember(Order = 11)] public double NativeWidth { get; set; }
         [DataMember(Order = 12)] public double NativeHeight { get; set; }
         [DataMember(Order = 13)] public bool Locked { get; set; }
+        /// <summary>Line weight grows and shrinks with Scale, with square ends that close corners (symbols).</summary>
+        [DataMember(Order = 14)] public bool StrokeScales { get; set; }
+        /// <summary>This layer's own material (null = the sign's default).</summary>
+        [DataMember(Order = 15)] public MaterialRef LayerMaterial { get; set; }
 
         /// <summary>Builds a graphic from paths in any position, moving their top-left corner to (0,0).</summary>
         public static GraphicElement FromPaths(string name, string source, IEnumerable<(Geometry.Vec2[] Points, bool Closed)> paths)

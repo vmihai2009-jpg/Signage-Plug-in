@@ -100,9 +100,19 @@ namespace BGSignage.Engine.RevitExport
                     var pRuleBack = Param(fm, RuleBack, GroupTypeId.Construction, SpecTypeId.Length);
                     var pRuleFront = Param(fm, RuleFront, GroupTypeId.Construction, SpecTypeId.Length);
                     var pPanelM = Param(fm, PanelMaterial, GroupTypeId.Materials, SpecTypeId.Reference.Material);
-                    var pLetterM = Param(fm, LetterMaterial, GroupTypeId.Materials, SpecTypeId.Reference.Material);
-                    var pAccentM = Param(fm, AccentMaterial, GroupTypeId.Materials, SpecTypeId.Reference.Material);
-                    var pRuleM = Param(fm, RuleMaterial, GroupTypeId.Materials, SpecTypeId.Reference.Material);
+                    // One material parameter per layer (named after it), created when a piece first needs it.
+                    var materialNames = sign.MaterialParameterNames();
+                    var materialParams = new Dictionary<string, FamilyParameter>(StringComparer.OrdinalIgnoreCase);
+                    FamilyParameter MaterialParam(Piece piece)
+                    {
+                        if (!materialNames.TryGetValue((piece.ElementId ?? "", piece.Material), out var pname))
+                            pname = piece.Material == MaterialSlot.Accent ? AccentMaterial : piece.Material == MaterialSlot.Rules ? RuleMaterial : LetterMaterial;
+                        if (materialParams.TryGetValue(pname, out var existing)) return existing;
+                        var fp = Param(fm, pname, GroupTypeId.Materials, SpecTypeId.Reference.Material);
+                        fm.Set(fp, MaterialId(fam, sign.MaterialFor(piece.ElementId, piece.Material)));
+                        materialParams[pname] = fp;
+                        return fp;
+                    }
                     var pData = Param(fm, SignData, GroupTypeId.Data, SpecTypeId.String.Text);
                     var pText = Param(fm, SignText, GroupTypeId.IdentityData, SpecTypeId.String.Text);
                     var pW = Param(fm, SignWidth, GroupTypeId.Data, SpecTypeId.Length);
@@ -116,9 +126,6 @@ namespace BGSignage.Engine.RevitExport
                     fm.Set(pRuleD, Ft(Math.Max(build.RuleDepth, 0.5)));
                     fm.Set(pRuleS, Ft(Math.Max(build.RuleStandoff, 0)));
                     fm.Set(pPanelM, MaterialId(fam, build.PanelMaterial));
-                    fm.Set(pLetterM, MaterialId(fam, build.LetterMaterial));
-                    fm.Set(pAccentM, MaterialId(fam, build.AccentMaterial));
-                    fm.Set(pRuleM, MaterialId(fam, build.RuleMaterial));
                     fm.Set(pData, SignSerializer.ToJson(sign));
                     fm.Set(pText, string.Join(" / ", sign.Frames.Select(f => (f.Text ?? "").Replace('\n', ' ').Trim()).Where(s => s.Length > 0)));
                     fm.Set(pW, Ft(geometry.PanelRect.Width * sizes[0] / 100.0));
@@ -205,7 +212,7 @@ namespace BGSignage.Engine.RevitExport
                             double front = back + (rule ? build.RuleDepth : build.LetterDepth);
                             var made = ExtrudePiece(fam, piece, mapK, sketch, back, front, minEdgeMm / k);
                             if (made.Count == 0) { failed++; continue; }
-                            var slotParam = piece.Material == MaterialSlot.Accent ? pAccentM : piece.Material == MaterialSlot.Rules ? pRuleM : pLetterM;
+                            var slotParam = MaterialParam(piece);
                             foreach (var e in made)
                             {
                                 Bind(fm, e, BuiltInParameter.EXTRUSION_START_PARAM, rule ? pRuleBack : pLetterBack);

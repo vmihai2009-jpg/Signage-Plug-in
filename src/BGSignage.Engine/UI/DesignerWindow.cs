@@ -155,6 +155,17 @@ namespace BGSignage.Engine.UI
             bar.Children.Add(Ui.Button("+ Text", "Add a text frame", (s, e) => AddFrame()));
             bar.Children.Add(Ui.Button("+ Rule", "Add a bar or rail (any angle)", (s, e) => AddRule()));
             bar.Children.Add(Ui.Button("+ Graphic…", "Import a logo or graphic from .dwg, .dxf, .ai or .pdf", (s, e) => ImportGraphic()));
+            var symbolsMenu = new ContextMenu();
+            foreach (var name in Symbols.Names)
+            {
+                var item = new MenuItem { Header = name };
+                item.Click += (s, e) => AddSymbol(name);
+                symbolsMenu.Items.Add(item);
+            }
+            var symbolButton = Ui.Button("+ Symbol ▾", "Add a pictogram: toilets, accessible, people, lift, stairs, bicycle, bins, café, arrows", null);
+            symbolButton.ContextMenu = symbolsMenu;
+            symbolButton.Click += (s, e) => { symbolsMenu.PlacementTarget = symbolButton; symbolsMenu.Placement = PlacementMode.Bottom; symbolsMenu.IsOpen = true; };
+            bar.Children.Add(symbolButton);
             bar.Children.Add(Ui.Button("Duplicate", "Duplicate the selected element (Ctrl+D)", (s, e) => DuplicateSelected()));
             bar.Children.Add(Ui.Button("Delete", "Delete the selected element (Delete key in the preview)", (s, e) => DeleteSelected()));
             bar.Children.Add(Sep());
@@ -710,6 +721,19 @@ namespace BGSignage.Engine.UI
                 AddGraphic(g, null);
             }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Import graphic"); }
+        }
+
+        void AddSymbol(string name)
+        {
+            var r = _geometry?.PanelRect ?? new Core.Geometry.Rect2(0, 0, 1000, 400);
+            // About the cap height of the main text, so it sits well next to it.
+            double size = Math.Round(Math.Max(40, Math.Min(r.Height * 0.4, (_doc.Frames.FirstOrDefault()?.DefaultFormat.SizeMm ?? 100) * 1.2)));
+            var g = Symbols.Create(name, size);
+            g.X = Math.Round(r.MinX + _doc.Panel.PaddingX);
+            g.Y = Math.Round(r.Center.Y - size / 2);
+            Change(() => _doc.Graphics.Add(g));
+            Select(g.Id);
+            _status.Text = $"Added the {name} symbol ({size:0} mm). Drag it into place; Scale and Rotate are on the Position tab.";
         }
 
         void AddGraphic(GraphicElement g, string note)

@@ -63,7 +63,7 @@ namespace BGSignage.Engine.UI
         {
             var b = new Button { Content = text, ToolTip = tip, Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 4, 0), MinHeight = 26 };
             if (primary) { b.Background = Accent; b.Foreground = Brushes.White; b.FontWeight = FontWeights.SemiBold; }
-            b.Click += click;
+            if (click != null) b.Click += click; // WPF refuses a null handler
             return b;
         }
 

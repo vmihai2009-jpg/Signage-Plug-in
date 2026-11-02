@@ -12,6 +12,10 @@ Works in **Revit 2024, 2025 and 2026**. New versions install from the **Updater*
 |---|---|---|---|---|
 | ![](docs/presets/reception-sign--lettering-on-backpanel.png) | ![](docs/presets/floor-directory--numbers---rules.png) | ![](docs/presets/directory--names-sitting-on-rails.png) | ![](docs/presets/directory--brass-rail-grid.png) | ![](docs/presets/directory--vertical-divider.png) |
 
+| Stand-off letters | Floor number | Wayfinding | Room plaque | Tenant directory |
+|---|---|---|---|---|
+| ![](docs/presets/stand-off-letters-on-wall--no-panel.png) | ![](docs/presets/floor-number--large-numeral.png) | ![](docs/presets/wayfinding--arrows.png) | ![](docs/presets/room-plaque--round.png) | ![](docs/presets/tenant-directory--two-columns.png) |
+
 *The built-in starting templates, laid out by the add-in's own text engine (shown here with a stand-in font).*
 
 ---
@@ -48,12 +52,13 @@ The window has four areas:
   **Scale whole sign** (resize the whole design by a percentage, with or without the thicknesses).
 - **Middle – Preview.** Live as you type. **3D view** shows depth, stand-off and shadows. Click to select,
   **drag to move any element** (**Shift = straight** across or up/down like InDesign, Ctrl = 10 mm steps, **Alt = drag a copy**), arrow keys nudge by
-  1 mm (Shift = 10 mm). Tick **Snap** on the toolbar to make elements land on the grid (choose the spacing next to it;
+  1 mm (Shift = 10 mm). **Drag on empty space** to select several elements (Shift-click adds or removes) and move,
+  nudge, duplicate or delete them together. Tick **Snap** on the toolbar to make elements land on the grid (choose the spacing next to it;
   the arrow keys then move one grid step),
   mouse wheel zooms (the **scale bar** bottom right follows the zoom), right-drag pans, **Fit** zooms to the sign. Under it is the **text box** for the selected frame
   (Enter = new paragraph).
 - **Right – Character / Paragraph / Position**, modelled on InDesign's panels.
-- **Top – toolbar**: templates, open/save `.bgsign`, undo/redo, add text / rule / graphic, duplicate, delete,
+- **Top – toolbar**: the **sign list** (signs already in this project, to edit and update, and the templates), open/save `.bgsign`, undo/redo, add text / rule / graphic, duplicate, delete,
   3D view, **Export to Revit**.
 
 ### Character panel (select text first; with nothing selected a change applies to the whole line)
@@ -131,6 +136,12 @@ Duplicate the type to make, for example, a brass and a black version of the same
 insertion point; thicknesses and materials are shared. Each size is modelled in the family (only the matching one is
 visible, through `BG_Size_Percent`), so a family with many sizes is larger. For one-off resizing, use *Scale whole
 sign* in the designer and export again.
+
+**Editing a sign.** Pick it in the sign list at the top left, or select one placed sign and click **Edit Sign**
+(double-clicking a sign in Revit opens Revit's own family editor instead). The export button then reads
+**Update in Revit** and replaces that family, so every placed copy changes, without starting a new placement. Change
+the family name first to make a separate sign instead; if that name is taken, you are asked whether to replace it
+or save under a new name.
 
 **Edit Sign** opens a placed sign in the designer, including any thickness, material or panel changes made in
 Revit. Export again with the same family name to update every placed copy.

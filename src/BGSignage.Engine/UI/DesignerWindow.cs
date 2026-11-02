@@ -31,6 +31,13 @@ namespace BGSignage.Engine.UI
         readonly DesignerSettings _settings = DesignerSettings.Load();
         SignDocument _doc;
         string _selId;
+        /// <summary>Everything selected (the primary, <see cref="_selId"/>, included).</summary>
+        readonly HashSet<string> _multi = new HashSet<string>();
+        /// <summary>The project family this design was opened from: Export then updates it in place.</summary>
+        string _sourceFamily;
+        List<SignDocument> _projectSigns = new List<SignDocument>();
+        ComboBox _source;
+        Button _exportButton;
         SignGeometry _geometry;
         bool _loading;
 
@@ -49,18 +56,22 @@ namespace BGSignage.Engine.UI
         ToggleButton _view3d;
         CheckBox _placeAfter;
 
-        public static void Open(UIApplication ui, SignDocument sign, List<MaterialRef> materials)
+        public static void Open(UIApplication ui, SignDocument sign, List<MaterialRef> materials, List<SignDocument> projectSigns = null)
         {
             if (_open != null && _open.IsLoaded)
             {
-                if (sign != null) _open.Load(sign, "Opened from the model");
+                if (projectSigns != null) { _open._projectSigns = projectSigns; _open.RefreshSourceList(); }
+                if (sign != null) { _open.Snapshot(); _open.Load(sign, $"Editing \"{sign.Name}\" from the model. Export updates it in place.", keepUndo: true); _open.SetSource(sign.Name); }
                 if (_open.WindowState == WindowState.Minimized) _open.WindowState = WindowState.Normal;
                 _open.Activate();
                 return;
             }
             _open = new DesignerWindow(ui, sign ?? Presets.Create(Presets.Names[0]), materials ?? new List<MaterialRef>());
+            _open._projectSigns = projectSigns ?? new List<SignDocument>();
             _open.Closed += (s, e) => _open = null;
             _open.Show();
+            _open.RefreshSourceList();
+            _open.SetSource(sign?.Name);
         }
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -131,16 +142,10 @@ namespace BGSignage.Engine.UI
         UIElement BuildToolbar()
         {
             var bar = new WrapPanel { Margin = new Thickness(8, 6, 8, 6) };
-            var templates = Ui.Combo(Presets.Names.ToArray());
-            templates.SelectedIndex = 0; templates.Width = 250; templates.Margin = new Thickness(0, 0, 4, 0);
-            templates.ToolTip = "Starting points based on typical reception and wayfinding signs";
-            bar.Children.Add(templates);
-            bar.Children.Add(Ui.Button("New", "Start a new sign from the chosen template", (s, e) =>
-            {
-                if (MessageBox.Show(this, "Start a new sign? Unsaved changes to this one are lost (Undo brings them back).", "New sign", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
-                Snapshot();
-                Load(Presets.Create((string)templates.SelectedItem), "New sign", keepUndo: true);
-            }));
+            _source = new ComboBox { Width = 290, Margin = new Thickness(0, 0, 4, 0), MinHeight = 24, MaxDropDownHeight = 600,
+                                     ToolTip = "Open a sign that is loaded in this project (to edit and update it), or start from a template" };
+            _source.SelectionChanged += (s, e) => OnSourcePicked();
+            bar.Children.Add(_source);
             bar.Children.Add(Ui.Button("Open…", "Open a saved sign (.bgsign)", (s, e) => OpenFile()));
             bar.Children.Add(Ui.Button("Save…", "Save the sign design (.bgsign) to reuse or share", (s, e) => SaveFile()));
             bar.Children.Add(Sep());
@@ -177,7 +182,8 @@ namespace BGSignage.Engine.UI
             };
             bar.Children.Add(gridSize);
             bar.Children.Add(Sep());
-            bar.Children.Add(Ui.Button("Export to Revit", "Build the parametric sign family, load it into the project and place it", (s, e) => Export(), primary: true));
+            _exportButton = Ui.Button("Export to Revit", "Build the parametric sign family, load it into the project and place it", (s, e) => Export(), primary: true);
+            bar.Children.Add(_exportButton);
             _placeAfter = new CheckBox { Content = "Place after export", IsChecked = _settings.PlaceAfterExport, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) };
             _placeAfter.Click += (s, e) => { _settings.PlaceAfterExport = _placeAfter.IsChecked == true; _settings.Save(); };
             bar.Children.Add(_placeAfter);
@@ -197,7 +203,8 @@ namespace BGSignage.Engine.UI
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(130) });
 
             _preview = new PreviewCanvas { ShowGrid = _settings.ShowGrid, GridMm = _settings.GridMm > 0 ? _settings.GridMm : 10 };
-            _preview.ElementClicked += id => Select(id);
+            _preview.ElementClicked += id => OnPreviewClicked(id);
+            _preview.MarqueeSelected += (ids, add) => SelectMany(add ? _multi.Concat(ids) : ids, ids.FirstOrDefault() ?? _selId);
             _preview.ElementDoubleClicked += id => { Select(id); if (Frame != null) _editor.Focus(); };
             _preview.DragStarted += id => StartDrag(id);
             _preview.Dragging += (id, dx, dy) => DragTo(id, dx, dy);
@@ -234,9 +241,42 @@ namespace BGSignage.Engine.UI
 
         void Select(string id)
         {
-            if (_selId == id) return;
+            if (_selId == id && _multi.Count <= 1) return;
+            _multi.Clear();
+            if (id != null) _multi.Add(id);
+            SetPrimary(id);
+        }
+
+        /// <summary>Selects several elements; <paramref name="primary"/> is the one the panels show.</summary>
+        void SelectMany(IEnumerable<string> ids, string primary)
+        {
+            _multi.Clear();
+            foreach (var i in ids.Where(Exists)) _multi.Add(i);
+            if (primary == null || !_multi.Contains(primary)) primary = _multi.FirstOrDefault();
+            _selId = null; // force a refresh
+            SetPrimary(primary);
+            if (_multi.Count > 1) _status.Text = $"{_multi.Count} elements selected: drag, nudge, duplicate or delete them together.";
+        }
+
+        void OnPreviewClicked(string id)
+        {
+            bool shift = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+            if (shift && id != null)
+            {
+                // Shift-click adds to or removes from the selection.
+                var ids = new HashSet<string>(_multi);
+                if (!ids.Remove(id)) ids.Add(id);
+                SelectMany(ids, ids.Contains(id) ? id : ids.FirstOrDefault());
+            }
+            else if (id != null && _multi.Contains(id) && _multi.Count > 1) SetPrimary(id); // keep the group to drag it
+            else if (!shift) Select(id);
+        }
+
+        void SetPrimary(string id)
+        {
             _selId = id;
             _preview.SelectedId = id;
+            _preview.MultiIds = _multi;
             _preview.InvalidateVisual();
             LoadEditor();
             RefreshAllPanels();
@@ -275,6 +315,8 @@ namespace BGSignage.Engine.UI
             var sel = _selId;
             _doc = SignSerializer.FromJson(json);
             _selId = Exists(sel) ? sel : _doc.Frames.FirstOrDefault()?.Id;
+            _multi.RemoveWhere(i => !Exists(i));
+            if (_selId != null) _multi.Add(_selId);
             LoadEditor();
             Rebuild(true);
         }
@@ -286,6 +328,8 @@ namespace BGSignage.Engine.UI
             if (!keepUndo) { _undo.Clear(); _redo.Clear(); }
             _doc = doc.Normalise();
             _selId = _doc.Frames.FirstOrDefault()?.Id;
+            _multi.Clear(); if (_selId != null) _multi.Add(_selId);
+            _preview.MultiIds = _multi;
             LoadEditor();
             Rebuild(true);
             _preview.FitToView();
@@ -380,11 +424,12 @@ namespace BGSignage.Engine.UI
         void OnPreviewKey(object sender, KeyEventArgs e)
         {
             if (_selId == null) return;
-            if (_doc.IsLocked(_selId))
+            if (e.Key == Key.Escape) { Select(null); e.Handled = true; return; }
+            if (Movable().Count == 0)
             {
                 if (e.Key == Key.Left || e.Key == Key.Right || e.Key == Key.Up || e.Key == Key.Down || e.Key == Key.Delete)
                 {
-                    _status.Text = "This element is locked. Unlock it in the Elements list to move or delete it.";
+                    _status.Text = "This element is locked. Unlock it in the Layers list to move or delete it.";
                     e.Handled = true;
                 }
                 return;
@@ -393,7 +438,7 @@ namespace BGSignage.Engine.UI
                         : Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1;
             double dx = e.Key == Key.Left ? -step : e.Key == Key.Right ? step : 0;
             double dy = e.Key == Key.Up ? -step : e.Key == Key.Down ? step : 0;
-            if (dx != 0 || dy != 0) { Change(() => MoveBy(_selId, dx, dy)); e.Handled = true; }
+            if (dx != 0 || dy != 0) { Change(() => { foreach (var id in Movable()) MoveBy(id, dx, dy); }); e.Handled = true; }
             else if (e.Key == Key.Delete) { DeleteSelected(); e.Handled = true; }
         }
 
@@ -414,24 +459,32 @@ namespace BGSignage.Engine.UI
             return null;
         }
 
+        /// <summary>The selected elements that are not locked.</summary>
+        List<string> Movable() => _multi.Where(i => !_doc.IsLocked(i)).ToList();
+
         void StartDrag(string id)
         {
             Snapshot();
-            // Alt-drag: leave the original where it is and drag a copy.
+            // Dragging one of several selected elements moves them all.
+            var group = _multi.Contains(id) ? Movable() : new List<string> { id };
+            if (!group.Contains(id)) group.Add(id);
+            // Alt-drag: leave the originals where they are and drag copies.
             if (_preview.DragIsCopy)
             {
-                var copy = CopyOf(id, 0, 0);
-                if (copy != null)
+                var copies = new Dictionary<string, string>();
+                foreach (var g in group) { var c = CopyOf(g, 0, 0); if (c != null) copies[g] = c; }
+                if (copies.TryGetValue(id, out var lead))
                 {
                     _doc.Normalise();
-                    id = copy;
-                    Select(copy);
-                    _preview.RetargetDrag(copy);
+                    group = copies.Values.ToList();
+                    id = lead;
+                    SelectMany(group, lead);
+                    _preview.RetargetDrag(lead);
                     Rebuild(true);
                 }
             }
-            var p = PositionOf(id);
-            _dragOrigin = p == null ? null : new Dictionary<string, (double, double)> { [id] = p.Value };
+            _dragOrigin = new Dictionary<string, (double, double)>();
+            foreach (var g in group) { var p = PositionOf(g); if (p != null) _dragOrigin[g] = p.Value; }
         }
 
         void DragTo(string id, double dx, double dy)
@@ -449,7 +502,13 @@ namespace BGSignage.Engine.UI
                 if (dx != 0) x = Math.Round(x / g) * g;
                 if (dy != 0) y = Math.Round(y / g) * g;
             }
-            MoveBy(id, x - now.Value.X, y - now.Value.Y);
+            // The dragged element sets the move (and the snap); the rest of the group follows by the same amount.
+            double mx = x - o.X, my = y - o.Y;
+            foreach (var kv in _dragOrigin)
+            {
+                var cur = PositionOf(kv.Key);
+                if (cur != null) MoveBy(kv.Key, kv.Value.X + mx - cur.Value.X, kv.Value.Y + my - cur.Value.Y);
+            }
             Rebuild(false);
             _loading = true;
             try { BuildPositionPanel(); } finally { _loading = false; }
@@ -479,10 +538,11 @@ namespace BGSignage.Engine.UI
         void DuplicateSelected()
         {
             if (_selId == null) return;
-            string newId = null;
-            double off = Frame != null ? 60 : 40;
-            Change(() => newId = CopyOf(_selId, Graphic != null ? off : 0, off));
-            if (newId != null) Select(newId);
+            var ids = _multi.Count > 0 ? _multi.ToList() : new List<string> { _selId };
+            double off = ids.Count == 1 && Frame != null ? 60 : 40;
+            var made = new Dictionary<string, string>();
+            Change(() => { foreach (var i in ids) { var c = CopyOf(i, ids.Count == 1 && Graphic == null ? 0 : off, off); if (c != null) made[i] = c; } });
+            if (made.Count > 0) SelectMany(made.Values, made.TryGetValue(_selId, out var p) ? p : made.Values.First());
         }
 
         /// <summary>Adds a copy of an element, moved by (dx, dy) mm, and returns its id. No undo point.</summary>
@@ -514,13 +574,13 @@ namespace BGSignage.Engine.UI
         void DeleteSelected()
         {
             if (_selId == null) return;
-            if (_doc.IsLocked(_selId)) { _status.Text = "This element is locked. Unlock it in the Elements list to delete it."; return; }
-            var id = _selId;
+            var ids = new HashSet<string>(Movable());
+            if (ids.Count == 0) { _status.Text = "This element is locked. Unlock it in the Layers list to delete it."; return; }
             Change(() =>
             {
-                _doc.Frames.RemoveAll(f => f.Id == id);
-                _doc.Rules.RemoveAll(r => r.Id == id);
-                _doc.Graphics.RemoveAll(g => g.Id == id);
+                _doc.Frames.RemoveAll(f => ids.Contains(f.Id));
+                _doc.Rules.RemoveAll(r => ids.Contains(r.Id));
+                _doc.Graphics.RemoveAll(g => ids.Contains(g.Id));
             });
             Select(_doc.Frames.FirstOrDefault()?.Id);
         }
@@ -543,7 +603,9 @@ namespace BGSignage.Engine.UI
                     foreach (var (id, label, locked) in wanted) _elements.Items.Add(ElementRow(id, label, locked));
                     _elementKeys = keys;
                 }
-                _elements.SelectedItem = _elements.Items.Cast<ListBoxItem>().FirstOrDefault(i => (string)i.Tag == _selId);
+                _elements.SelectedItems.Clear();
+                foreach (var item in _elements.Items.Cast<ListBoxItem>().Where(i => _multi.Contains((string)i.Tag) || (string)i.Tag == _selId))
+                    _elements.SelectedItems.Add(item);
             }
             finally { _loading = wasLoading; }
         }
@@ -665,18 +727,113 @@ namespace BGSignage.Engine.UI
 
         // ------------------------------------------------------------------ export
 
+        // ------------------------------------------------------------------ open from project / templates
+
+        sealed class SourceItem
+        {
+            public string Label; public SignDocument Sign; public string Template;
+            public override string ToString() => Label;
+        }
+
+        bool _refreshingSource;
+
+        /// <summary>The top-left list: signs loaded in this project, then the templates.</summary>
+        void RefreshSourceList()
+        {
+            if (_source == null) return;
+            _refreshingSource = true;
+            try
+            {
+                _source.Items.Clear();
+                _source.Items.Add(new ComboBoxItem { Content = "Open a sign or template…", IsEnabled = false });
+                ComboBoxItem Header(string text) => new ComboBoxItem
+                {
+                    Content = text, IsEnabled = false, FontWeight = FontWeights.SemiBold, FontSize = 10.5, Foreground = Ui.Header,
+                    Margin = new Thickness(0, 4, 0, 0),
+                };
+                _source.Items.Add(Header("IN THIS PROJECT"));
+                if (_projectSigns.Count == 0) _source.Items.Add(new ComboBoxItem { Content = "   (none yet: export a sign)", IsEnabled = false, Foreground = Ui.Muted });
+                foreach (var s in _projectSigns) _source.Items.Add(new ComboBoxItem { Content = "   " + s.Name, Tag = new SourceItem { Label = s.Name, Sign = s } });
+                _source.Items.Add(Header("TEMPLATES"));
+                foreach (var t in Presets.Names) _source.Items.Add(new ComboBoxItem { Content = "   " + t, Tag = new SourceItem { Label = t, Template = t } });
+                _source.SelectedIndex = 0;
+            }
+            finally { _refreshingSource = false; }
+        }
+
+        void OnSourcePicked()
+        {
+            if (_refreshingSource || !(_source.SelectedItem is ComboBoxItem item) || !(item.Tag is SourceItem pick)) return;
+            Snapshot();
+            if (pick.Sign != null)
+            {
+                Load(SignSerializer.Clone(pick.Sign), $"Editing \"{pick.Sign.Name}\" from the project. Export updates it in place (Undo goes back).", keepUndo: true);
+                SetSource(pick.Sign.Name);
+            }
+            else
+            {
+                Load(Presets.Create(pick.Template), $"New sign from the template \"{pick.Template}\" (Undo goes back).", keepUndo: true);
+                SetSource(null);
+            }
+            _refreshingSource = true;
+            try { _source.SelectedIndex = 0; } finally { _refreshingSource = false; }
+        }
+
+        /// <summary>Remembers which project family this design belongs to and labels the export button.</summary>
+        void SetSource(string familyName)
+        {
+            _sourceFamily = familyName;
+            if (_exportButton == null) return;
+            _exportButton.Content = familyName != null ? "Update in Revit" : "Export to Revit";
+            _exportButton.ToolTip = familyName != null
+                ? $"Replace \"{familyName}\" in the project: every placed copy updates. Change the family name to export a new sign instead."
+                : "Build the parametric sign family, load it into the project and place it";
+        }
+
         void Export()
         {
             if (RevitBridge.Instance == null) { MessageBox.Show(this, "Restart the designer from the ribbon.", "Export"); return; }
             var sign = SignSerializer.Clone(_doc);
             string folder = _settings.Folder;
-            bool place = _placeAfter.IsChecked == true;
-            _status.Text = "Building the family in Revit…";
+            // Working on a sign from the project: replace that family (every placed copy updates), no new placement.
+            bool updating = _sourceFamily != null && string.Equals(SignExporter.SafeName(sign.Name), SignExporter.SafeName(_sourceFamily), StringComparison.OrdinalIgnoreCase);
+            bool place = !updating && _placeAfter.IsChecked == true;
+            _status.Text = updating ? $"Updating \"{sign.Name}\" in Revit…" : "Building the family in Revit…";
             RevitBridge.Instance.Run(app =>
             {
+                var doc = app.ActiveUIDocument?.Document;
+                if (!updating && doc != null && !doc.IsFamilyDocument && SignExporter.FamilyExists(doc, sign.Name))
+                {
+                    // A different sign with this name is already in the project: don't overwrite it by accident.
+                    string free = sign.Name;
+                    for (int n = 2; SignExporter.FamilyExists(doc, free); n++) free = $"{sign.Name} {n}";
+                    var td = new TaskDialog("BG Signage")
+                    {
+                        MainInstruction = $"\"{sign.Name}\" is already in this project",
+                        MainContent = "Exporting with the same name replaces that sign everywhere it is placed.",
+                        CommonButtons = Autodesk.Revit.UI.TaskDialogCommonButtons.Cancel,
+                    };
+                    td.AddCommandLink(Autodesk.Revit.UI.TaskDialogCommandLinkId.CommandLink1, $"Save as a new sign, \"{free}\"");
+                    td.AddCommandLink(Autodesk.Revit.UI.TaskDialogCommandLinkId.CommandLink2, $"Replace \"{sign.Name}\"", "Every placed copy changes to this design.");
+                    var answer = td.Show();
+                    if (answer == Autodesk.Revit.UI.TaskDialogResult.CommandLink1)
+                    {
+                        sign.Name = free;
+                        _doc.Name = free;
+                        _loading = true; try { RefreshSignPanel(); } finally { _loading = false; }
+                    }
+                    else if (answer == Autodesk.Revit.UI.TaskDialogResult.CommandLink2) place = false;
+                    else { _status.Text = "Export cancelled."; return; }
+                }
                 string msg;
                 try { msg = SignExporter.Export(app, sign, folder, place); }
                 catch (Exception ex) { msg = "Export failed: " + ex.Message; }
+                if (!msg.StartsWith("Export failed"))
+                {
+                    SetSource(sign.Name);
+                    try { _projectSigns = SignExporter.ProjectSigns(doc); RefreshSourceList(); } catch { }
+                    if (updating) msg = $"\"{sign.Name}\" is updated: every placed copy shows the new design.\n" + string.Join("\n", msg.Split('\n').Skip(1));
+                }
                 bool failed = msg.StartsWith("Export failed");
                 _status.Text = failed ? msg.Split('\n')[0] : msg.Split('\n')[0] + " " + SignExporter.PlacementHint(sign.Build.Hosting);
                 if (place && !failed)

@@ -39,14 +39,17 @@ namespace BGSignage.Engine.UI
         {
             var p = new StackPanel();
             p.Children.Add(Ui.Title("Layers"));
-            _elements = new ListBox { Height = 170 };
+            _elements = new ListBox { Height = 170, SelectionMode = SelectionMode.Extended };
             _elements.SelectionChanged += (s, e) =>
             {
                 if (_loading) return;
-                if (_elements.SelectedItem is ListBoxItem item) Select((string)item.Tag);
+                var ids = _elements.SelectedItems.Cast<ListBoxItem>().Select(i => (string)i.Tag).ToList();
+                if (ids.Count <= 1) { if (ids.Count == 1) Select(ids[0]); return; }
+                var added = e.AddedItems.Cast<ListBoxItem>().Select(i => (string)i.Tag).LastOrDefault();
+                SelectMany(ids, added ?? _selId);
             };
             p.Children.Add(_elements);
-            p.Children.Add(Ui.Note("Click an element in the preview or here; drag it in the preview to move it (Shift = straight across or up/down, Ctrl = 10 mm steps, Alt = drag a copy), or nudge with the arrow keys. Tick Snap on the toolbar to land on the grid. The padlock locks a layer so it can't be picked or moved in the preview."));
+            p.Children.Add(Ui.Note("Click an element in the preview or here; drag it in the preview to move it (Shift = straight across or up/down, Ctrl = 10 mm steps, Alt = drag a copy), or nudge with the arrow keys. Drag on an empty part of the preview to select several (Shift-click adds or removes; Ctrl-click in this list too). Tick Snap on the toolbar to land on the grid. The padlock locks a layer so it can't be picked or moved in the preview."));
 
             p.Children.Add(Ui.Title("Sign"));
             _signName = new TextBox();

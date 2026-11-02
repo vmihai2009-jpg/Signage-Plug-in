@@ -122,6 +122,24 @@ namespace BGSignage.Engine.RevitExport
             return sign;
         }
 
+        /// <summary>Every sign made with the designer that is loaded in the project, by family name.</summary>
+        public static List<SignDocument> ProjectSigns(Document doc)
+        {
+            var list = new List<SignDocument>();
+            if (doc == null || doc.IsFamilyDocument) return list;
+            foreach (var family in new FilteredElementCollector(doc).OfClass(typeof(Family)).Cast<Family>())
+            {
+                var symbol = family.GetFamilySymbolIds().Select(id => doc.GetElement(id)).OfType<FamilySymbol>()
+                    .FirstOrDefault(s => s.LookupParameter(FamilyBuilder.SignData) != null);
+                if (symbol == null) continue;
+                try { var sign = ReadBack(doc, symbol); if (sign != null) list.Add(sign); } catch { /* unreadable: skip */ }
+            }
+            return list.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        public static bool FamilyExists(Document doc, string name) =>
+            new FilteredElementCollector(doc).OfClass(typeof(Family)).Cast<Family>().Any(f => string.Equals(f.Name, SafeName(name), StringComparison.OrdinalIgnoreCase));
+
         /// <summary>Project materials (name and shaded colour), for the material pickers.</summary>
         public static List<MaterialRef> ProjectMaterials(Document doc) =>
             new FilteredElementCollector(doc).OfClass(typeof(Material)).Cast<Material>()

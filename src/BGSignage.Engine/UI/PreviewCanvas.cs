@@ -34,6 +34,13 @@ namespace BGSignage.Engine.UI
         Vector _panAtStart;
 
         public string SelectedId { get; set; }
+        /// <summary>Everything selected, for the highlight.</summary>
+        public ICollection<string> MultiIds { get; set; } = new HashSet<string>();
+        /// <summary>A selection box was dragged over empty space: the elements it touches (true = Shift, add to the selection).</summary>
+        public event Action<List<string>, bool> MarqueeSelected;
+
+        bool _marquee;
+        Point _marqueeStart, _marqueeEnd; // mm
         public bool ThreeD { get; set; }
         public bool ShowGrid { get; set; } = true;
         /// <summary>Grid spacing in mm (minor lines; every 10th line is darker).</summary>
@@ -203,12 +210,18 @@ namespace BGSignage.Engine.UI
             // Frames and selection.
             foreach (var kv in _geometry.ElementBoxes)
             {
-                bool selected = kv.Key == SelectedId;
+                bool selected = kv.Key == SelectedId || (MultiIds != null && MultiIds.Contains(kv.Key));
                 bool locked = _doc.IsLocked(kv.Key);
                 if (!selected && (locked || _doc.Rules.Any(r => r.Id == kv.Key))) continue;
                 var box = Shape(new[] { kv.Value });
                 dc.DrawGeometry(null, !selected ? Dashed(Color.FromArgb(60, 0, 90, 200))
                                       : locked ? Dashed(Color.FromRgb(150, 150, 150), 1.6) : Dashed(Color.FromRgb(0, 120, 215), 1.6), box);
+            }
+            if (_marquee)
+            {
+                var r = new Rect(_marqueeStart, _marqueeEnd);
+                var fill = new SolidColorBrush(Color.FromArgb(28, 0, 120, 215));
+                dc.DrawRectangle(fill, Dashed(Color.FromRgb(0, 120, 215), 1), r);
             }
             dc.Pop();
 
@@ -299,10 +312,16 @@ namespace BGSignage.Engine.UI
             var mm = ToMm(pos);
             var id = HitTest(mm);
             if (e.ClickCount == 2 && id != null) { ElementDoubleClicked?.Invoke(id); return; }
-            ElementClicked?.Invoke(id);
+            if (id != null || !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) ElementClicked?.Invoke(id);
             if (id != null)
             {
                 _dragId = id; _dragStartMm = mm; _lastMm = mm; _dragging = false;
+                CaptureMouse();
+            }
+            else
+            {
+                // Empty space: drag a selection box.
+                _marquee = true; _marqueeStart = _marqueeEnd = mm;
                 CaptureMouse();
             }
         }
@@ -314,6 +333,13 @@ namespace BGSignage.Engine.UI
             if (_panning)
             {
                 _pan = _panAtStart + (pos - _panStart);
+                InvalidateVisual();
+                return;
+            }
+            if (_marquee)
+            {
+                if (e.LeftButton != MouseButtonState.Pressed) { _marquee = false; InvalidateVisual(); return; }
+                _marqueeEnd = ToMm(pos);
                 InvalidateVisual();
                 return;
             }
@@ -342,12 +368,32 @@ namespace BGSignage.Engine.UI
             {
                 _panning = false; ReleaseMouseCapture(); Cursor = Cursors.Arrow; return;
             }
+            if (e.ChangedButton == MouseButton.Left && _marquee)
+            {
+                _marquee = false;
+                if (IsMouseCaptured) ReleaseMouseCapture();
+                var r = new Rect(_marqueeStart, _marqueeEnd);
+                InvalidateVisual();
+                if (r.Width * _zoom < 4 && r.Height * _zoom < 4 || _geometry == null) return; // a click, not a box
+                var hits = _geometry.ElementBoxes
+                    .Where(kv => !_doc.IsLocked(kv.Key) && Touches(kv.Value, r))
+                    .Select(kv => kv.Key).ToList();
+                MarqueeSelected?.Invoke(hits, Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
+                return;
+            }
             if (e.ChangedButton == MouseButton.Left)
             {
                 _dragId = null; _dragging = false; DragIsCopy = false;
                 Cursor = Cursors.Arrow;
                 if (IsMouseCaptured) ReleaseMouseCapture();
             }
+        }
+
+        /// <summary>True when an element's outline overlaps the box (touching is enough, as in InDesign).</summary>
+        static bool Touches(Vec2[] outline, Rect box)
+        {
+            var b = Rect2.Of(outline);
+            return b.MaxX >= box.Left && b.MinX <= box.Right && b.MaxY >= box.Top && b.MinY <= box.Bottom;
         }
 
         protected override void OnMouseWheel(MouseWheelEventArgs e)

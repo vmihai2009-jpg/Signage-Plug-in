@@ -23,7 +23,7 @@ namespace BGSignage.Engine
                 RevitBridge.EnsureCreated();
                 var doc = data.Application.ActiveUIDocument?.Document;
                 var materials = doc == null || doc.IsFamilyDocument ? null : SignExporter.ProjectMaterials(doc);
-                DesignerWindow.Open(data.Application, null, materials);
+                DesignerWindow.Open(data.Application, null, materials, SignExporter.ProjectSigns(doc));
                 return Result.Succeeded;
             }
             catch (Exception ex) { message = ex.Message; return Result.Failed; }
@@ -42,7 +42,9 @@ namespace BGSignage.Engine
                 var uidoc = data.Application.ActiveUIDocument;
                 if (uidoc == null) { message = "Open a project first."; return Result.Failed; }
                 var doc = uidoc.Document;
-                FamilyInstance instance = uidoc.Selection.GetElementIds().Select(id => doc.GetElement(id)).OfType<FamilyInstance>().FirstOrDefault(IsSign);
+                // Only use the selection when it is exactly one sign; otherwise ask, so the right one opens.
+                var selected = uidoc.Selection.GetElementIds().Select(id => doc.GetElement(id)).OfType<FamilyInstance>().Where(IsSign).ToList();
+                FamilyInstance instance = selected.Count == 1 && uidoc.Selection.GetElementIds().Count == 1 ? selected[0] : null;
                 if (instance == null)
                 {
                     try
@@ -54,7 +56,7 @@ namespace BGSignage.Engine
                 }
                 var sign = instance == null ? null : SignExporter.ReadBack(doc, instance.Symbol);
                 if (sign == null) { message = "That is not a sign made with the Sign Designer."; return Result.Failed; }
-                DesignerWindow.Open(data.Application, sign, SignExporter.ProjectMaterials(doc));
+                DesignerWindow.Open(data.Application, sign, SignExporter.ProjectMaterials(doc), SignExporter.ProjectSigns(doc));
                 return Result.Succeeded;
             }
             catch (Exception ex) { message = ex.Message; return Result.Failed; }

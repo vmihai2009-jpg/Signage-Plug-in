@@ -11,7 +11,7 @@
     <AssemblyName>BGSignage.Engine</AssemblyName>
     <RootNamespace>BGSignage.Engine</RootNamespace>
     <!-- The release version. CI sets it from the tag (v0.2.0 -> 0.2.0). -->
-    <Version>0.4.1</Version>
+    <Version>0.5.0</Version>
     <Version Condition="'$(EngineVersion)' != ''">$(EngineVersion)</Version>
   </PropertyGroup>
 

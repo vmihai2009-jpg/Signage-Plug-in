@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 namespace BGSignage.Core.Model
 {
@@ -14,6 +15,11 @@ namespace BGSignage.Core.Model
             "Directory (names sitting on rails)",
             "Directory (brass rail grid)",
             "Directory (vertical divider)",
+            "Stand-off letters on wall (no panel)",
+            "Floor number (large numeral)",
+            "Wayfinding (arrows)",
+            "Room plaque (round)",
+            "Tenant directory (two columns)",
             "Blank sign",
         };
 
@@ -25,6 +31,11 @@ namespace BGSignage.Core.Model
                 case "Directory (names sitting on rails)": return NamesOnRails();
                 case "Directory (brass rail grid)": return RailGrid();
                 case "Directory (vertical divider)": return VerticalDivider();
+                case "Stand-off letters on wall (no panel)": return StandOffLetters();
+                case "Floor number (large numeral)": return FloorNumber();
+                case "Wayfinding (arrows)": return Wayfinding();
+                case "Room plaque (round)": return RoomPlaque();
+                case "Tenant directory (two columns)": return TwoColumnDirectory();
                 case "Blank sign": return Blank();
                 default: return Reception();
             }
@@ -141,6 +152,123 @@ namespace BGSignage.Core.Model
             double bottom = 34 + 22 + pitch * (names.Length - 1) + 30;
             foreach (var x in new[] { 200.0, 520.0, 900.0 })
                 d.Rules.Add(new RuleElement { Name = "Upright", X = x, Y = bottom, Length = bottom + 10, AngleDeg = 90, WeightMm = 8 });
+            return d.Normalise();
+        }
+
+        /// <summary>Big lettering pinned off the wall with no panel, like a lobby name wall.</summary>
+        public static SignDocument StandOffLetters()
+        {
+            var d = new SignDocument { Name = "Stand-off Lettering" };
+            d.Panel.Enabled = false; d.Panel.PaddingX = 50; d.Panel.PaddingY = 50;
+            d.Build.LetterDepth = 25; d.Build.LetterStandoff = 30;
+            d.Build.LetterMaterial = new MaterialRef("BG Sign - Brushed Brass", 196, 170, 120);
+            d.Build.AccentMaterial = new MaterialRef("BG Sign - Black Metal", 25, 25, 25);
+            var name = TextFrame.Create("Name", "COMPANY", Font(260, 600, 120), Para(TextAlign.Center), 0, 0, 2000);
+            d.Frames.Add(name);
+            var tag = TextFrame.Create("Tagline", "ARCHITECTURE  ·  INTERIORS", Font(60, 400, 500), Para(TextAlign.Center), 0, 380, 2000);
+            Editing.TextEditing.ApplyCharacter(tag, 0, tag.Text.Length, f => f.Material = MaterialSlot.Accent);
+            d.Frames.Add(tag);
+            return d.Normalise();
+        }
+
+        /// <summary>A large floor numeral with the floor name and a short list under a rule, as at a lift lobby.</summary>
+        public static SignDocument FloorNumber()
+        {
+            var d = new SignDocument { Name = "Floor Number" };
+            d.Panel.Enabled = false; d.Panel.PaddingX = 40; d.Panel.PaddingY = 40;
+            d.Build.LetterDepth = 12; d.Build.RuleDepth = 4;
+            d.Build.LetterMaterial = new MaterialRef("BG Sign - Black Metal", 25, 25, 25);
+            d.Build.AccentMaterial = new MaterialRef("BG Sign - Brushed Brass", 196, 170, 120);
+            d.Build.RuleMaterial = new MaterialRef("BG Sign - Brushed Brass", 196, 170, 120);
+            var num = TextFrame.Create("Numeral", "3", Font(600, 600, -20), Para(), 0, 0);
+            d.Frames.Add(num);
+            var label = TextFrame.Create("Floor name", "THIRD FLOOR", Font(50, 600, 300), Para(), 0, 520, 700);
+            Editing.TextEditing.ApplyCharacter(label, 0, label.Text.Length, f => f.Material = MaterialSlot.Accent);
+            d.Frames.Add(label);
+            d.Rules.Add(new RuleElement { Name = "Rule", X = 0, Y = 630, Length = 700, WeightMm = 5 });
+            d.Frames.Add(TextFrame.Create("Rooms", "Meeting Rooms 3.01 – 3.08\nStudio\nTerrace", Font(36, 400, 20, 56), Para(), 0, 690, 700));
+            return d.Normalise();
+        }
+
+        /// <summary>Directional sign: arrows and destinations on a panel, one per row with rules between.</summary>
+        public static SignDocument Wayfinding()
+        {
+            var d = new SignDocument { Name = "Wayfinding Sign" };
+            d.Panel.Width = 1200; d.Panel.Height = 700; d.Panel.CornerRadius = 10;
+            d.Build.PanelThickness = 10; d.Build.LetterDepth = 3; d.Build.RuleDepth = 2;
+            d.Build.PanelMaterial = new MaterialRef("BG Sign - Dark Grey", 55, 58, 60);
+            d.Build.LetterMaterial = new MaterialRef("BG Sign - White", 245, 245, 242);
+            d.Build.AccentMaterial = new MaterialRef("BG Sign - Yellow", 230, 185, 40);
+            d.Build.RuleMaterial = new MaterialRef("BG Sign - White", 245, 245, 242);
+            var rows = new[] { ("Reception", 'R'), ("Meeting Rooms 1–6", 'L'), ("Lifts  ·  Stairs", 'U'), ("Cafe", 'R') };
+            const double top = 90, pitch = 140;
+            for (int k = 0; k < rows.Length; k++)
+            {
+                double y = top + k * pitch;
+                var arrow = GraphicElement.FromPaths("Arrow " + (k + 1), "template", new[] { (Arrow(rows[k].Item2, 80), true) });
+                arrow.X = 80; arrow.Y = y - 10; arrow.Material = MaterialSlot.Accent;
+                d.Graphics.Add(arrow);
+                d.Frames.Add(TextFrame.Create(rows[k].Item1, rows[k].Item1, Font(60, 500, 10), Para(), 220, y, 900));
+                if (k < rows.Length - 1) d.Rules.Add(new RuleElement { Name = $"Rule {k + 1}", X = 80, Y = y + 100, Length = 1040, WeightMm = 2 });
+            }
+            return d.Normalise();
+        }
+
+        /// <summary>An arrow in an s × s box, pointing Right, Left, Up or Down (sign coordinates, y down).</summary>
+        static Geometry.Vec2[] Arrow(char dir, double s)
+        {
+            // Pointing right: shaft 0.36 s thick, head 0.5 s long.
+            double t = 0.18 * s, h = 0.5 * s;
+            var right = new[] { (0.0, s / 2 - t), (s - h, s / 2 - t), (s - h, 0.0), (s, s / 2), (s - h, s), (s - h, s / 2 + t), (0.0, s / 2 + t) };
+            return right.Select(p =>
+            {
+                double x = p.Item1, y = p.Item2;
+                switch (dir)
+                {
+                    case 'L': return new Geometry.Vec2(s - x, y);
+                    case 'U': return new Geometry.Vec2(y, s - x);
+                    case 'D': return new Geometry.Vec2(y, x);
+                    default: return new Geometry.Vec2(x, y);
+                }
+            }).ToArray();
+        }
+
+        /// <summary>A round door or room plaque: number over name.</summary>
+        public static SignDocument RoomPlaque()
+        {
+            var d = new SignDocument { Name = "Room Plaque" };
+            d.Panel.Shape = PanelShape.Ellipse; d.Panel.Width = 300; d.Panel.Height = 300;
+            d.Build.PanelThickness = 8; d.Build.LetterDepth = 2;
+            d.Build.PanelMaterial = new MaterialRef("BG Sign - Brushed Brass", 196, 170, 120);
+            d.Build.LetterMaterial = new MaterialRef("BG Sign - Black Metal", 25, 25, 25);
+            d.Frames.Add(TextFrame.Create("Number", "1.04", Font(70, 600, 20), Para(TextAlign.Center), 30, 95, 240));
+            var name = TextFrame.Create("Room", "MEETING\nROOM", Font(22, 500, 250, 32), Para(TextAlign.Center), 30, 190, 240);
+            Editing.TextEditing.ApplyParagraph(name, 0, 0, p =>
+                p.RuleAbove = new ParagraphRule { On = true, WeightMm = 1.5, OffsetMm = 18, Width = RuleWidthMode.Fixed, LengthMm = 60 });
+            d.Frames.Add(name);
+            return d.Normalise();
+        }
+
+        /// <summary>Tenant directory: names on the left, floors aligned on the right, thin rules between rows.</summary>
+        public static SignDocument TwoColumnDirectory()
+        {
+            var d = new SignDocument { Name = "Tenant Directory" };
+            d.Panel.Width = 900; d.Panel.Height = 1000;
+            d.Build.PanelThickness = 15; d.Build.LetterDepth = 4; d.Build.RuleDepth = 2;
+            d.Build.PanelMaterial = new MaterialRef("BG Sign - Smoked Oak", 120, 92, 66);
+            d.Build.LetterMaterial = new MaterialRef("BG Sign - Cream", 236, 230, 214);
+            d.Build.RuleMaterial = new MaterialRef("BG Sign - Cream", 236, 230, 214);
+            d.Build.AccentMaterial = new MaterialRef("BG Sign - Cream", 236, 230, 214);
+            d.Frames.Add(TextFrame.Create("Heading", "DIRECTORY", Font(50, 600, 400), Para(), 80, 90, 740));
+            d.Rules.Add(new RuleElement { Name = "Heading rule", X = 80, Y = 180, Length = 740, WeightMm = 4 });
+            string[] names = { "Atelier North", "Halden & Co", "Marlow Studio", "Penrose Partners", "Studio Kite", "The Long Room", "Wren Associates" };
+            string[] floors = { "6", "5", "5", "4", "3", "2", "1" };
+            const double pitch = 100;
+            var left = TextFrame.Create("Tenants", string.Join("\n", names), Font(40, 400, 10, pitch), Para(), 80, 240, 600);
+            Editing.TextEditing.ApplyParagraph(left, 0, left.Text.Length, p =>
+                p.RuleBelow = new ParagraphRule { On = true, WeightMm = 1, OffsetMm = 30, Width = RuleWidthMode.Fixed, LengthMm = 740 });
+            d.Frames.Add(left);
+            d.Frames.Add(TextFrame.Create("Floors", string.Join("\n", floors), Font(40, 600, 0, pitch), Para(TextAlign.Right), 700, 240, 120));
             return d.Normalise();
         }
 

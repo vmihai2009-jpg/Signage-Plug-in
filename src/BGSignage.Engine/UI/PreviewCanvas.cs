@@ -82,7 +82,7 @@ namespace BGSignage.Engine.UI
             {
                 bool positive = Polygons.SignedArea(island[i]) > 0;
                 bool wantPositive = i == 0;
-                yield return positive == wantPositive ? island[i] : island[i].Reverse().ToArray();
+                yield return positive == wantPositive ? island[i] : Enumerable.Reverse(island[i]).ToArray();
             }
         }
 

@@ -15,6 +15,7 @@ namespace BGSignage.Core.Model
             "Directory (names sitting on rails)",
             "Directory (brass rail grid)",
             "Directory (vertical divider)",
+            "Directory (slanted rules)",
             "Stand-off letters on wall (no panel)",
             "Floor number (large numeral)",
             "Wayfinding (arrows)",
@@ -31,6 +32,7 @@ namespace BGSignage.Core.Model
                 case "Directory (names sitting on rails)": return NamesOnRails();
                 case "Directory (brass rail grid)": return RailGrid();
                 case "Directory (vertical divider)": return VerticalDivider();
+                case "Directory (slanted rules)": return SlantedRules();
                 case "Stand-off letters on wall (no panel)": return StandOffLetters();
                 case "Floor number (large numeral)": return FloorNumber();
                 case "Wayfinding (arrows)": return Wayfinding();
@@ -269,6 +271,28 @@ namespace BGSignage.Core.Model
                 p.RuleBelow = new ParagraphRule { On = true, WeightMm = 1, OffsetMm = 30, Width = RuleWidthMode.Fixed, LengthMm = 740 });
             d.Frames.Add(left);
             d.Frames.Add(TextFrame.Create("Floors", string.Join("\n", floors), Font(40, 600, 0, pitch), Para(TextAlign.Right), 700, 240, 120));
+            return d.Normalise();
+        }
+
+        /// <summary>Big floor numbers with the names between sloping rules.</summary>
+        public static SignDocument SlantedRules()
+        {
+            var d = new SignDocument { Name = "Slanted Rule Directory" };
+            d.Panel.Enabled = false; d.Panel.PaddingX = 40; d.Panel.PaddingY = 40;
+            d.Build.LetterDepth = 10; d.Build.RuleDepth = 4;
+            d.Build.LetterMaterial = new MaterialRef("BG Sign - Black Metal", 25, 25, 25);
+            d.Build.RuleMaterial = new MaterialRef("BG Sign - Brushed Brass", 196, 170, 120);
+            var floors = new[] { ("3", "Studio\nMeeting Rooms"), ("2", "Lounge\nLibrary"), ("1", "Reception\nCafe") };
+            const double pitch = 300, width = 720, slope = 6; // degrees, rising to the right
+            double rise = width * System.Math.Tan(slope * System.Math.PI / 180);
+            for (int k = 0; k <= floors.Length; k++)
+                d.Rules.Add(new RuleElement { Name = $"Sloped rule {k + 1}", X = 0, Y = k * pitch + rise, Length = width / System.Math.Cos(slope * System.Math.PI / 180), AngleDeg = slope, WeightMm = 5 });
+            for (int k = 0; k < floors.Length; k++)
+            {
+                double top = k * pitch + rise + 50;
+                d.Frames.Add(TextFrame.Create($"Floor {floors[k].Item1}", floors[k].Item1, Font(170, 600), Para(), 0, top));
+                d.Frames.Add(TextFrame.Create($"Floor {floors[k].Item1} names", floors[k].Item2, Font(36, 500, 60, 54, CapsMode.AllCaps), Para(), 190, top - 10, 500));
+            }
             return d.Normalise();
         }
 

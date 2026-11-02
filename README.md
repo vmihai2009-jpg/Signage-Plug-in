@@ -12,9 +12,9 @@ Works in **Revit 2024, 2025 and 2026**. New versions install from the **Updater*
 |---|---|---|---|---|
 | ![](docs/presets/reception-sign--lettering-on-backpanel.png) | ![](docs/presets/floor-directory--numbers---rules.png) | ![](docs/presets/directory--names-sitting-on-rails.png) | ![](docs/presets/directory--brass-rail-grid.png) | ![](docs/presets/directory--vertical-divider.png) |
 
-| Stand-off letters | Floor number | Wayfinding | Room plaque | Tenant directory |
-|---|---|---|---|---|
-| ![](docs/presets/stand-off-letters-on-wall--no-panel.png) | ![](docs/presets/floor-number--large-numeral.png) | ![](docs/presets/wayfinding--arrows.png) | ![](docs/presets/room-plaque--round.png) | ![](docs/presets/tenant-directory--two-columns.png) |
+| Slanted rules | Stand-off letters | Floor number | Wayfinding | Room plaque | Tenant directory |
+|---|---|---|---|---|---|
+| ![](docs/presets/directory--slanted-rules.png) | ![](docs/presets/stand-off-letters-on-wall--no-panel.png) | ![](docs/presets/floor-number--large-numeral.png) | ![](docs/presets/wayfinding--arrows.png) | ![](docs/presets/room-plaque--round.png) | ![](docs/presets/tenant-directory--two-columns.png) |
 
 *The built-in starting templates, laid out by the add-in's own text engine (shown here with a stand-in font).*
 

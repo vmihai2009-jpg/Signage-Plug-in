@@ -121,9 +121,16 @@ namespace BGSignage.Core.Model
         [DataMember(Order = 8)] public MaterialRef RuleMaterial { get; set; } = new MaterialRef("BG Sign - Rules", 150, 120, 70);
         [DataMember(Order = 9)] public Hosting Hosting { get; set; } = Hosting.WallBased;
         [DataMember(Order = 10)] public OriginPoint Origin { get; set; } = OriginPoint.Center;
+        /// <summary>
+        /// Sizes the family is built in, in % of the design (100 = as drawn). Each becomes a family type, e.g.
+        /// "75%", "100%", "150%", so the whole sign can be resized in Revit by changing its type.
+        /// </summary>
+        [DataMember(Order = 11)] public List<int> FamilySizes { get; set; } = new List<int> { 100 };
 
         public void Normalise()
         {
+            FamilySizes = (FamilySizes ?? new List<int>()).Where(s => s >= 5 && s <= 1000).Distinct().OrderBy(s => s).ToList();
+            if (FamilySizes.Count == 0) FamilySizes.Add(100);
             PanelMaterial = PanelMaterial ?? new MaterialRef("BG Sign - Panel", 236, 233, 226);
             LetterMaterial = LetterMaterial ?? new MaterialRef("BG Sign - Lettering", 40, 40, 40);
             AccentMaterial = AccentMaterial ?? new MaterialRef("BG Sign - Accent", 176, 125, 72);

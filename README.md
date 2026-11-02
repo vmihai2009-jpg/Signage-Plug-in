@@ -43,9 +43,12 @@ The window has four areas:
 - **Left – Elements and Sign.** The list of text frames, rules (bars/rails) and graphics; the family name;
   the backpanel (on/off, rectangle or ellipse, fixed size or *fit to content + padding*, corner radius);
   construction (panel thickness, letter depth, letter stand-off, rule depth, rule stand-off); the four materials
-  (Panel, Letters, Accent, Rules); and how the family is hosted (**wall based** by default).
+  (Panel, Letters, Accent, Rules); how the family is hosted (**wall based** by default); the family **sizes**; and
+  **Scale whole sign** (resize the whole design by a percentage, with or without the thicknesses).
 - **Middle – Preview.** Live as you type. **3D view** shows depth, stand-off and shadows. Click to select,
-  **drag to move any element** (Shift = 10 mm steps, Ctrl = straight), arrow keys nudge by 1 mm (Shift = 10 mm),
+  **drag to move any element** (Shift = 10 mm steps, Ctrl = straight, **Alt = drag a copy**), arrow keys nudge by
+  1 mm (Shift = 10 mm). Tick **Snap** on the toolbar to make elements land on the grid (choose the spacing next to it;
+  the arrow keys then move one grid step),
   mouse wheel zooms, right-drag pans, **Fit** zooms to the sign. Under it is the **text box** for the selected frame
   (Enter = new paragraph).
 - **Right – Character / Paragraph / Position**, modelled on InDesign's panels.
@@ -117,6 +120,12 @@ loads it into the project and starts placing it (untick *Place after export* to 
 | `BG_Sign_Data` | The design itself, so **Edit Sign** can reopen it. Don't edit by hand. |
 
 Duplicate the type to make, for example, a brass and a black version of the same sign.
+
+**Sizes.** Type several sizes in *Sizes (%)*, e.g. `75, 100, 150`, and the family gets one type per size (`75%`,
+`100%`, `150%`). Changing a placed sign's type resizes the whole face (panel, letters, rules, logos) about its
+insertion point; thicknesses and materials are shared. Each size is modelled in the family (only the matching one is
+visible, through `BG_Size_Percent`), so a family with many sizes is larger. For one-off resizing, use *Scale whole
+sign* in the designer and export again.
 
 **Edit Sign** opens a placed sign in the designer, including any thickness, material or panel changes made in
 Revit. Export again with the same family name to update every placed copy.

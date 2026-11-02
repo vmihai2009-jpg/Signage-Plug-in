@@ -42,10 +42,13 @@ namespace BGSignage.Engine.RevitExport
                 t.Commit();
             }
 
-            var symbol = family.GetFamilySymbolIds().Select(id => doc.GetElement(id)).OfType<FamilySymbol>().FirstOrDefault();
+            var symbols = family.GetFamilySymbolIds().Select(id => doc.GetElement(id)).OfType<FamilySymbol>().ToList();
+            var symbol = symbols.FirstOrDefault(x => x.Name == "100%") ?? symbols.FirstOrDefault();
             if (place && symbol != null) uidoc.PostRequestForElementTypePlacement(symbol);
 
             var lines = new List<string> { $"\"{name}\" is loaded ({built.Solids} solids).", rfa };
+            if (built.TypeNames.Count > 1)
+                lines.Add($"Sizes (family types): {string.Join(", ", built.TypeNames)}. Change the type to resize a placed sign.");
             if (built.Warnings.Count > 0) lines.Add("\nNotes:\n• " + string.Join("\n• ", built.Warnings.Distinct().Take(8)));
             if (place) lines.Add(sign.Build.Hosting == Hosting.WallBased
                 ? "\nClick a wall to place it. Set its height with \"Elevation from Level\"; the arrows flip it to the other face."

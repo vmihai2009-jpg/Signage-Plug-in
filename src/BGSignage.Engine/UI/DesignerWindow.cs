@@ -153,9 +153,25 @@ namespace BGSignage.Engine.UI
             _view3d.Click += (s, e) => { _preview.ThreeD = _view3d.IsChecked == true; _preview.InvalidateVisual(); };
             bar.Children.Add(_view3d);
             bar.Children.Add(Ui.Button("Fit", "Zoom to the whole sign", (s, e) => _preview.FitToView()));
-            var grid = new CheckBox { Content = "Grid", IsChecked = true, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 8, 0) };
-            grid.Click += (s, e) => { _preview.ShowGrid = grid.IsChecked == true; _preview.InvalidateVisual(); };
+            var grid = new CheckBox { Content = "Grid", IsChecked = _settings.ShowGrid, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 6, 0) };
+            grid.Click += (s, e) => { _settings.ShowGrid = _preview.ShowGrid = grid.IsChecked == true; _settings.Save(); _preview.InvalidateVisual(); };
             bar.Children.Add(grid);
+            var snap = new CheckBox { Content = "Snap", IsChecked = _settings.SnapToGrid, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0),
+                                      ToolTip = "Snap to the grid: dragged elements land on gridlines and the arrow keys move one grid step" };
+            snap.Click += (s, e) => { _settings.SnapToGrid = snap.IsChecked == true; _settings.Save(); };
+            bar.Children.Add(snap);
+            var gridSize = Ui.Combo(GridSizes.Select(g => g + " mm").ToArray());
+            gridSize.Width = 70; gridSize.Margin = new Thickness(0, 0, 8, 0); gridSize.ToolTip = "Grid spacing";
+            int gi = Array.IndexOf(GridSizes, _settings.GridMm);
+            gridSize.SelectedIndex = gi >= 0 ? gi : Array.IndexOf(GridSizes, 10.0);
+            gridSize.SelectionChanged += (s, e) =>
+            {
+                if (gridSize.SelectedIndex < 0) return;
+                _settings.GridMm = _preview.GridMm = GridSizes[gridSize.SelectedIndex];
+                _settings.Save();
+                _preview.InvalidateVisual();
+            };
+            bar.Children.Add(gridSize);
             bar.Children.Add(Sep());
             bar.Children.Add(Ui.Button("Export to Revit", "Build the parametric sign family, load it into the project and place it", (s, e) => Export(), primary: true));
             _placeAfter = new CheckBox { Content = "Place after export", IsChecked = _settings.PlaceAfterExport, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) };
@@ -164,6 +180,8 @@ namespace BGSignage.Engine.UI
             bar.Children.Add(Ui.Button("Folder…", "Where the .rfa families are saved", (s, e) => ChooseExportFolder()));
             return bar;
         }
+
+        static readonly double[] GridSizes = { 1, 2, 5, 10, 20, 25, 50, 100 };
 
         static UIElement Sep() => new Border { Width = 1, Background = Ui.Border, Margin = new Thickness(6, 2, 8, 2) };
 
@@ -174,7 +192,7 @@ namespace BGSignage.Engine.UI
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(130) });
 
-            _preview = new PreviewCanvas();
+            _preview = new PreviewCanvas { ShowGrid = _settings.ShowGrid, GridMm = _settings.GridMm > 0 ? _settings.GridMm : 10 };
             _preview.ElementClicked += id => Select(id);
             _preview.ElementDoubleClicked += id => { Select(id); if (Frame != null) _editor.Focus(); };
             _preview.DragStarted += id => StartDrag(id);
@@ -358,7 +376,8 @@ namespace BGSignage.Engine.UI
         void OnPreviewKey(object sender, KeyEventArgs e)
         {
             if (_selId == null) return;
-            double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1;
+            double step = _settings.SnapToGrid ? _preview.GridMm * (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1)
+                        : Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1;
             double dx = e.Key == Key.Left ? -step : e.Key == Key.Right ? step : 0;
             double dy = e.Key == Key.Up ? -step : e.Key == Key.Down ? step : 0;
             if (dx != 0 || dy != 0) { Change(() => MoveBy(_selId, dx, dy)); e.Handled = true; }
@@ -385,6 +404,19 @@ namespace BGSignage.Engine.UI
         void StartDrag(string id)
         {
             Snapshot();
+            // Alt-drag: leave the original where it is and drag a copy.
+            if (_preview.DragIsCopy)
+            {
+                var copy = CopyOf(id, 0, 0);
+                if (copy != null)
+                {
+                    _doc.Normalise();
+                    id = copy;
+                    Select(copy);
+                    _preview.RetargetDrag(copy);
+                    Rebuild(true);
+                }
+            }
             var p = PositionOf(id);
             _dragOrigin = p == null ? null : new Dictionary<string, (double, double)> { [id] = p.Value };
         }
@@ -394,7 +426,16 @@ namespace BGSignage.Engine.UI
             if (_dragOrigin == null || !_dragOrigin.TryGetValue(id, out var o)) return;
             var now = PositionOf(id);
             if (now == null) return;
-            MoveBy(id, o.X + dx - now.Value.X, o.Y + dy - now.Value.Y);
+            double x = o.X + dx, y = o.Y + dy;
+            if (_settings.SnapToGrid)
+            {
+                // The element's own position (frame: left / top of capitals; rule: its start; graphic: its anchor)
+                // lands on a gridline. An axis held still with Ctrl is left where it was.
+                double g = _preview.GridMm > 0 ? _preview.GridMm : 10;
+                if (dx != 0) x = Math.Round(x / g) * g;
+                if (dy != 0) y = Math.Round(y / g) * g;
+            }
+            MoveBy(id, x - now.Value.X, y - now.Value.Y);
             Rebuild(false);
             _loading = true;
             try { BuildPositionPanel(); } finally { _loading = false; }
@@ -423,25 +464,37 @@ namespace BGSignage.Engine.UI
 
         void DuplicateSelected()
         {
+            if (_selId == null) return;
             string newId = null;
-            if (Frame != null)
-            {
-                var copy = SignSerializer.FromJson(SignSerializer.ToJson(new SignDocument { Frames = { Frame } })).Frames[0];
-                copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.Y += 60;
-                Change(() => _doc.Frames.Add(copy)); newId = copy.Id;
-            }
-            else if (Rule != null)
-            {
-                var copy = Rule.Clone(); copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.Y += 40;
-                Change(() => _doc.Rules.Add(copy)); newId = copy.Id;
-            }
-            else if (Graphic != null)
-            {
-                var copy = SignSerializer.FromJson(SignSerializer.ToJson(new SignDocument { Graphics = { Graphic } })).Graphics[0];
-                copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += 40; copy.Y += 40;
-                Change(() => _doc.Graphics.Add(copy)); newId = copy.Id;
-            }
+            double off = Frame != null ? 60 : 40;
+            Change(() => newId = CopyOf(_selId, Graphic != null ? off : 0, off));
             if (newId != null) Select(newId);
+        }
+
+        /// <summary>Adds a copy of an element, moved by (dx, dy) mm, and returns its id. No undo point.</summary>
+        string CopyOf(string id, double dx, double dy)
+        {
+            if (_doc.Frames.FirstOrDefault(x => x.Id == id) is TextFrame f)
+            {
+                var copy = SignSerializer.FromJson(SignSerializer.ToJson(new SignDocument { Frames = { f } })).Frames[0];
+                copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += dx; copy.Y += dy;
+                _doc.Frames.Insert(_doc.Frames.IndexOf(f) + 1, copy);
+                return copy.Id;
+            }
+            if (_doc.Rules.FirstOrDefault(x => x.Id == id) is RuleElement r)
+            {
+                var copy = r.Clone(); copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += dx; copy.Y += dy;
+                _doc.Rules.Insert(_doc.Rules.IndexOf(r) + 1, copy);
+                return copy.Id;
+            }
+            if (_doc.Graphics.FirstOrDefault(x => x.Id == id) is GraphicElement g)
+            {
+                var copy = SignSerializer.FromJson(SignSerializer.ToJson(new SignDocument { Graphics = { g } })).Graphics[0];
+                copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += dx; copy.Y += dy;
+                _doc.Graphics.Insert(_doc.Graphics.IndexOf(g) + 1, copy);
+                return copy.Id;
+            }
+            return null;
         }
 
         void DeleteSelected()

@@ -12,8 +12,11 @@ namespace BGSignage.Engine.UI
         [DataMember] public string ExportFolder { get; set; }
         [DataMember] public bool PlaceAfterExport { get; set; } = true;
         [DataMember] public string LastFolder { get; set; }
+        [DataMember] public bool ShowGrid { get; set; } = true;
+        [DataMember] public bool SnapToGrid { get; set; }
+        [DataMember] public double GridMm { get; set; } = 10;
 
-        [OnDeserializing] void Defaults(StreamingContext _) { PlaceAfterExport = true; }
+        [OnDeserializing] void Defaults(StreamingContext _) { PlaceAfterExport = true; ShowGrid = true; GridMm = 10; }
 
         public string Folder => string.IsNullOrWhiteSpace(ExportFolder)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "BG Signage")

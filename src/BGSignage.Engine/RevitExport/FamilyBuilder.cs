@@ -37,6 +37,7 @@ namespace BGSignage.Engine.RevitExport
         public const string SignText = "BG_Sign_Text";
         public const string SignWidth = "BG_Sign_Width";
         public const string SignHeight = "BG_Sign_Height";
+        public const string SizePercent = "BG_Size_Percent";
 
         static double Ft(double mm) => mm / 304.8;
 
@@ -45,6 +46,8 @@ namespace BGSignage.Engine.RevitExport
             public string Path;
             public int Solids;
             public List<string> Warnings = new List<string>();
+            /// <summary>Type names when the family has several sizes.</summary>
+            public List<string> TypeNames = new List<string>();
         }
 
         public static Result CreateFamilyFile(RevitApp app, SignDocument sign, string rfaPath)
@@ -81,6 +84,8 @@ namespace BGSignage.Engine.RevitExport
 
                     var fm = fam.FamilyManager;
                     if (fm.CurrentType == null) fm.NewType(sign.Name);
+                    var sizes = build.FamilySizes.Count > 0 ? build.FamilySizes : new List<int> { 100 };
+                    bool multi = sizes.Count > 1;
 
                     // Parameters (type parameters: Edit Type changes every sign of that type).
                     var pHas = Param(fm, HasPanel, GroupTypeId.Construction, SpecTypeId.Boolean.YesNo);
@@ -116,8 +121,32 @@ namespace BGSignage.Engine.RevitExport
                     fm.Set(pRuleM, MaterialId(fam, build.RuleMaterial));
                     fm.Set(pData, SignSerializer.ToJson(sign));
                     fm.Set(pText, string.Join(" / ", sign.Frames.Select(f => (f.Text ?? "").Replace('\n', ' ').Trim()).Where(s => s.Length > 0)));
-                    fm.Set(pW, Ft(geometry.PanelRect.Width));
-                    fm.Set(pH, Ft(geometry.PanelRect.Height));
+                    fm.Set(pW, Ft(geometry.PanelRect.Width * sizes[0] / 100.0));
+                    fm.Set(pH, Ft(geometry.PanelRect.Height * sizes[0] / 100.0));
+
+                    // Sizes: one family type per size ("75%", "100%"...). Every size's geometry is in the family and
+                    // only the one matching the type's BG_Size_Percent is visible, so changing the type resizes the sign.
+                    FamilyParameter pSize = null;
+                    var visLetters = new Dictionary<int, FamilyParameter>();
+                    var visPanel = new Dictionary<int, FamilyParameter>();
+                    var visRules = new Dictionary<int, FamilyParameter>();
+                    if (multi)
+                    {
+                        pSize = Param(fm, SizePercent, GroupTypeId.Geometry, SpecTypeId.Int.Integer);
+                        foreach (var size in sizes)
+                        {
+                            visLetters[size] = Param(fm, $"BG_Show_{size}pc", GroupTypeId.Visibility, SpecTypeId.Boolean.YesNo);
+                            visPanel[size] = Param(fm, $"BG_Show_{size}pc_Panel", GroupTypeId.Visibility, SpecTypeId.Boolean.YesNo);
+                            visRules[size] = Param(fm, $"BG_Show_{size}pc_Rules", GroupTypeId.Visibility, SpecTypeId.Boolean.YesNo);
+                        }
+                        fm.Set(pSize, sizes[0]);
+                        foreach (var size in sizes)
+                        {
+                            fm.SetFormula(visLetters[size], $"{SizePercent} = {size}");
+                            fm.SetFormula(visPanel[size], $"and({HasPanel}, {SizePercent} = {size})");
+                            fm.SetFormula(visRules[size], $"and({ShowRules}, {SizePercent} = {size})");
+                        }
+                    }
 
                     // Letters and rules sit on the panel face when the panel is on, on the wall when it is off.
                     fm.SetFormula(pLetterBack, $"if({HasPanel}, {PanelThickness}, 0 * {PanelThickness}) + {LetterStandoff}");
@@ -149,38 +178,63 @@ namespace BGSignage.Engine.RevitExport
                     }
                     var sketch = SketchPlane.Create(fam, plane);
 
-                    // Panel, with true arcs for rounded corners and ellipses.
-                    var panel = Extrude(fam, PanelProfile(sign.Panel, geometry.PanelRect, map, faceBased), sketch, 0, build.PanelThickness);
-                    if (panel != null)
-                    {
-                        Bind(fm, panel, BuiltInParameter.EXTRUSION_END_PARAM, pPanelT);
-                        Bind(fm, panel, BuiltInParameter.MATERIAL_ID_PARAM, pPanelM);
-                        Bind(fm, panel, BuiltInParameter.IS_VISIBLE_PARAM, pHas);
-                        result.Solids++;
-                    }
-                    else result.Warnings.Add("The backpanel could not be built.");
-
                     double panelT = sign.Panel.Enabled ? build.PanelThickness : 0;
                     int failed = 0;
-                    foreach (var piece in geometry.Pieces)
+                    foreach (var size in sizes)
                     {
-                        bool rule = piece.Role == PieceRole.Rule;
-                        double back = panelT + (rule ? build.RuleStandoff : build.LetterStandoff);
-                        double front = back + (rule ? build.RuleDepth : build.LetterDepth);
-                        var made = ExtrudePiece(fam, piece, map, sketch, back, front, minEdgeMm);
-                        if (made.Count == 0) { failed++; continue; }
-                        var slotParam = piece.Material == MaterialSlot.Accent ? pAccentM : piece.Material == MaterialSlot.Rules ? pRuleM : pLetterM;
-                        foreach (var e in made)
+                        // The face scales about the insertion point; thicknesses stay the type parameters.
+                        double k = size / 100.0;
+                        Func<Vec2, XYZ> mapK = p => map(new Vec2(origin.X + (p.X - origin.X) * k, origin.Y + (p.Y - origin.Y) * k));
+                        var pr = geometry.PanelRect;
+
+                        // Panel, with true arcs for rounded corners and ellipses.
+                        var panel = Extrude(fam, PanelProfile(sign.Panel, pr, mapK, faceBased, k), sketch, 0, build.PanelThickness);
+                        if (panel != null)
                         {
-                            Bind(fm, e, BuiltInParameter.EXTRUSION_START_PARAM, rule ? pRuleBack : pLetterBack);
-                            Bind(fm, e, BuiltInParameter.EXTRUSION_END_PARAM, rule ? pRuleFront : pLetterFront);
-                            Bind(fm, e, BuiltInParameter.MATERIAL_ID_PARAM, slotParam);
-                            if (rule) Bind(fm, e, BuiltInParameter.IS_VISIBLE_PARAM, pShowRules);
+                            Bind(fm, panel, BuiltInParameter.EXTRUSION_END_PARAM, pPanelT);
+                            Bind(fm, panel, BuiltInParameter.MATERIAL_ID_PARAM, pPanelM);
+                            Bind(fm, panel, BuiltInParameter.IS_VISIBLE_PARAM, multi ? visPanel[size] : pHas);
                             result.Solids++;
+                        }
+                        else result.Warnings.Add($"The backpanel{(multi ? $" at {size}%" : "")} could not be built.");
+
+                        foreach (var piece in geometry.Pieces)
+                        {
+                            bool rule = piece.Role == PieceRole.Rule;
+                            double back = panelT + (rule ? build.RuleStandoff : build.LetterStandoff);
+                            double front = back + (rule ? build.RuleDepth : build.LetterDepth);
+                            var made = ExtrudePiece(fam, piece, mapK, sketch, back, front, minEdgeMm / k);
+                            if (made.Count == 0) { failed++; continue; }
+                            var slotParam = piece.Material == MaterialSlot.Accent ? pAccentM : piece.Material == MaterialSlot.Rules ? pRuleM : pLetterM;
+                            foreach (var e in made)
+                            {
+                                Bind(fm, e, BuiltInParameter.EXTRUSION_START_PARAM, rule ? pRuleBack : pLetterBack);
+                                Bind(fm, e, BuiltInParameter.EXTRUSION_END_PARAM, rule ? pRuleFront : pLetterFront);
+                                Bind(fm, e, BuiltInParameter.MATERIAL_ID_PARAM, slotParam);
+                                if (multi) Bind(fm, e, BuiltInParameter.IS_VISIBLE_PARAM, rule ? visRules[size] : visLetters[size]);
+                                else if (rule) Bind(fm, e, BuiltInParameter.IS_VISIBLE_PARAM, pShowRules);
+                                result.Solids++;
+                            }
                         }
                     }
                     if (failed > 0)
                         result.Warnings.Add($"{failed} small shape(s) could not be modelled (usually details too fine for Revit at this size).");
+
+                    // One type per size. A new type starts as a copy of the current one, so only the size differs.
+                    if (multi)
+                    {
+                        result.TypeNames.Clear();
+                        for (int i = 0; i < sizes.Count; i++)
+                        {
+                            string typeName = sizes[i] + "%";
+                            if (i == 0) fm.RenameCurrentType(typeName);
+                            else fm.NewType(typeName);
+                            fm.Set(pSize, sizes[i]);
+                            fm.Set(pW, Ft(geometry.PanelRect.Width * sizes[i] / 100.0));
+                            fm.Set(pH, Ft(geometry.PanelRect.Height * sizes[i] / 100.0));
+                            result.TypeNames.Add(typeName);
+                        }
+                    }
 
                     t.Commit();
                 }
@@ -231,7 +285,8 @@ namespace BGSignage.Engine.RevitExport
             return id;
         }
 
-        static CurveArrArray PanelProfile(BackPanel panel, Rect2 r, Func<Vec2, XYZ> map, bool faceBased)
+        /// <param name="k">Size factor: the outline is drawn through <paramref name="map"/> (which scales positions); radii scale here.</param>
+        static CurveArrArray PanelProfile(BackPanel panel, Rect2 r, Func<Vec2, XYZ> map, bool faceBased, double k)
         {
             var arr = new CurveArrArray();
             var loop = new CurveArray();
@@ -239,35 +294,35 @@ namespace BGSignage.Engine.RevitExport
             {
                 var c = map(r.Center);
                 var yAxis = faceBased ? XYZ.BasisY : XYZ.BasisZ;
-                double rx = Ft(r.Width / 2), ry = Ft(r.Height / 2);
+                double rx = Ft(r.Width * k / 2), ry = Ft(r.Height * k / 2);
                 loop.Append(Ellipse.CreateCurve(c, rx, ry, XYZ.BasisX, yAxis, 0, Math.PI));
                 loop.Append(Ellipse.CreateCurve(c, rx, ry, XYZ.BasisX, yAxis, Math.PI, 2 * Math.PI));
             }
             else
             {
                 double rad = Math.Max(0, Math.Min(panel.CornerRadius, Math.Min(r.Width, r.Height) / 2 - 0.5));
-                if (rad < 1)
+                if (rad * k < 1)
                 {
                     var pts = Polygons.Rectangle(r.MinX, r.MinY, r.MaxX, r.MaxY);
                     for (int i = 0; i < 4; i++) loop.Append(Line.CreateBound(map(pts[i]), map(pts[(i + 1) % 4])));
                 }
                 else
                 {
-                    double x0 = r.MinX, x1 = r.MaxX, y0 = r.MinY, y1 = r.MaxY, k = rad * (1 - Math.Sqrt(0.5));
+                    double x0 = r.MinX, x1 = r.MaxX, y0 = r.MinY, y1 = r.MaxY, c = rad * (1 - Math.Sqrt(0.5));
                     void L(double ax, double ay, double bx, double by)
                     {
-                        if (Math.Abs(ax - bx) + Math.Abs(ay - by) > 0.5) loop.Append(Line.CreateBound(map(new Vec2(ax, ay)), map(new Vec2(bx, by))));
+                        if ((Math.Abs(ax - bx) + Math.Abs(ay - by)) * k > 0.5) loop.Append(Line.CreateBound(map(new Vec2(ax, ay)), map(new Vec2(bx, by))));
                     }
                     void A(double ax, double ay, double mx, double my, double bx, double by) =>
                         loop.Append(Arc.Create(map(new Vec2(ax, ay)), map(new Vec2(bx, by)), map(new Vec2(mx, my))));
                     L(x0 + rad, y0, x1 - rad, y0);
-                    A(x1 - rad, y0, x1 - k, y0 + k, x1, y0 + rad);
+                    A(x1 - rad, y0, x1 - c, y0 + c, x1, y0 + rad);
                     L(x1, y0 + rad, x1, y1 - rad);
-                    A(x1, y1 - rad, x1 - k, y1 - k, x1 - rad, y1);
+                    A(x1, y1 - rad, x1 - c, y1 - c, x1 - rad, y1);
                     L(x1 - rad, y1, x0 + rad, y1);
-                    A(x0 + rad, y1, x0 + k, y1 - k, x0, y1 - rad);
+                    A(x0 + rad, y1, x0 + c, y1 - c, x0, y1 - rad);
                     L(x0, y1 - rad, x0, y0 + rad);
-                    A(x0, y0 + rad, x0 + k, y0 + k, x0 + rad, y0);
+                    A(x0, y0 + rad, x0 + c, y0 + c, x0 + rad, y0);
                 }
             }
             arr.Append(loop);

@@ -36,14 +36,22 @@ namespace BGSignage.Engine.UI
         public string SelectedId { get; set; }
         public bool ThreeD { get; set; }
         public bool ShowGrid { get; set; } = true;
+        /// <summary>Grid spacing in mm (minor lines; every 10th line is darker).</summary>
+        public double GridMm { get; set; } = 10;
+        /// <summary>True while the current drag started with Alt held (the window drags a copy).</summary>
+        public bool DragIsCopy { get; private set; }
         public Color WallColour { get; set; } = Color.FromRgb(214, 210, 203);
 
         public event Action<string> ElementClicked;
         public event Action<string> ElementDoubleClicked;
+        /// <summary>A drag is starting. The window may answer with <see cref="RetargetDrag"/> (Alt-drag drags a copy).</summary>
         public event Action<string> DragStarted;
         /// <summary>Total movement in mm since the drag started (snapped to whole millimetres).</summary>
         public event Action<string, double, double> Dragging;
         public event Action<Point> PointerMoved;
+
+        /// <summary>Drags another element from here on, e.g. the copy made by Alt-drag.</summary>
+        public void RetargetDrag(string id) { if (_dragId != null && id != null) _dragId = id; }
 
         public PreviewCanvas()
         {
@@ -218,21 +226,21 @@ namespace BGSignage.Engine.UI
 
         void DrawGrid(DrawingContext dc)
         {
-            // 10 mm minor / 100 mm major grid, thinned out when zoomed out.
-            double minor = 10;
-            while (minor * _zoom < 8) minor *= 10;
+            // Minor lines at the grid spacing, every 10th darker; thinned out when zoomed out.
+            double minor = GridMm > 0 ? GridMm : 10;
+            while (minor * _zoom < 6) minor *= 10;
             var pMinor = new Pen(new SolidColorBrush(Color.FromArgb(22, 0, 0, 0)), 1);
             var pMajor = new Pen(new SolidColorBrush(Color.FromArgb(45, 0, 0, 0)), 1);
             var a = ToMm(new Point(0, 0)); var b = ToMm(new Point(ActualWidth, ActualHeight));
-            for (double x = Math.Floor(a.X / minor) * minor; x <= b.X; x += minor)
+            for (long i = (long)Math.Floor(a.X / minor); i * minor <= b.X; i++)
             {
-                double sx = x * _zoom + _pan.X;
-                dc.DrawLine(Math.Abs(x % (minor * 10)) < 1e-6 ? pMajor : pMinor, new Point(sx, 0), new Point(sx, ActualHeight));
+                double sx = i * minor * _zoom + _pan.X;
+                dc.DrawLine(i % 10 == 0 ? pMajor : pMinor, new Point(sx, 0), new Point(sx, ActualHeight));
             }
-            for (double y = Math.Floor(a.Y / minor) * minor; y <= b.Y; y += minor)
+            for (long i = (long)Math.Floor(a.Y / minor); i * minor <= b.Y; i++)
             {
-                double sy = y * _zoom + _pan.Y;
-                dc.DrawLine(Math.Abs(y % (minor * 10)) < 1e-6 ? pMajor : pMinor, new Point(0, sy), new Point(ActualWidth, sy));
+                double sy = i * minor * _zoom + _pan.Y;
+                dc.DrawLine(i % 10 == 0 ? pMajor : pMinor, new Point(0, sy), new Point(ActualWidth, sy));
             }
         }
 
@@ -289,6 +297,8 @@ namespace BGSignage.Engine.UI
             {
                 if ((pos - new Point(_dragStartMm.X * _zoom + _pan.X, _dragStartMm.Y * _zoom + _pan.Y)).Length < 4) return;
                 _dragging = true;
+                DragIsCopy = Keyboard.Modifiers.HasFlag(ModifierKeys.Alt);
+                if (DragIsCopy) Cursor = Cursors.Cross;
                 DragStarted?.Invoke(_dragId);
             }
             double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1;
@@ -307,7 +317,8 @@ namespace BGSignage.Engine.UI
             }
             if (e.ChangedButton == MouseButton.Left)
             {
-                _dragId = null; _dragging = false;
+                _dragId = null; _dragging = false; DragIsCopy = false;
+                Cursor = Cursors.Arrow;
                 if (IsMouseCaptured) ReleaseMouseCapture();
             }
         }

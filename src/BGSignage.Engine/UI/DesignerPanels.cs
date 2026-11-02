@@ -17,6 +17,7 @@ namespace BGSignage.Engine.UI
         TextBox _signName;
         CheckBox _panelOn, _autoFit;
         ComboBox _shape, _hosting, _origin;
+        TextBox _familySizes;
         NumberField _panelW, _panelH, _padX, _padY, _radius, _panelT, _letterD, _letterS, _ruleD, _ruleS;
         readonly List<(MaterialSlot? Slot, ComboBox Name, Button Swatch)> _materialRows = new List<(MaterialSlot?, ComboBox, Button)>();
 
@@ -45,7 +46,7 @@ namespace BGSignage.Engine.UI
                 if (_elements.SelectedItem is ListBoxItem item) Select((string)item.Tag);
             };
             p.Children.Add(_elements);
-            p.Children.Add(Ui.Note("Click an element in the preview or here; drag it in the preview to move it (Shift = 10 mm steps, Ctrl = straight), or nudge with the arrow keys."));
+            p.Children.Add(Ui.Note("Click an element in the preview or here; drag it in the preview to move it (Shift = 10 mm steps, Ctrl = straight, Alt = drag a copy), or nudge with the arrow keys. Tick Snap on the toolbar to land on the grid."));
 
             p.Children.Add(Ui.Title("Sign"));
             _signName = new TextBox();
@@ -95,7 +96,47 @@ namespace BGSignage.Engine.UI
             _origin = Ui.Combo("Centre", "Bottom centre", "Bottom left", "Top left");
             _origin.SelectionChanged += (s, e) => { if (!_loading) Change(() => _doc.Build.Origin = (OriginPoint)_origin.SelectedIndex); };
             p.Children.Add(Ui.Labelled("Insertion point", _origin, "The family's insertion point on the sign. With Centre, the Elevation in Revit is the centre height."));
+
+            _familySizes = new TextBox { Height = 24, VerticalContentAlignment = VerticalAlignment.Center };
+            void CommitSizes()
+            {
+                if (_loading) return;
+                var sizes = ParseSizes(_familySizes.Text);
+                if (sizes.SequenceEqual(_doc.Build.FamilySizes)) { _familySizes.Text = SizesText(sizes); return; }
+                Change(() => _doc.Build.FamilySizes = sizes);
+            }
+            _familySizes.LostFocus += (s, e) => CommitSizes();
+            _familySizes.KeyDown += (s, e) => { if (e.Key == System.Windows.Input.Key.Enter) CommitSizes(); };
+            p.Children.Add(Ui.Labelled("Sizes (%)", _familySizes,
+                "Each size becomes a family type, e.g. 75, 100, 150 gives the types 75%, 100% and 150%. Change the type in Revit to resize the whole sign."));
+            p.Children.Add(Ui.Note("Several sizes, e.g. \"75, 100, 150\", give one family type per size: pick a type in Revit to resize the sign. Thicknesses stay the same in every size."));
+
+            p.Children.Add(Ui.Title("Scale whole sign"));
+            var scale = new NumberField("Scale", "%", 5, 1, 1000, 1, "Resizes everything: text, spacing, rules, graphics and the panel");
+            scale.Value = 100;
+            var depthsToo = new CheckBox { Content = "Thicknesses too", Margin = new Thickness(0, 2, 0, 2), ToolTip = "Also scale the panel thickness, letter and rule depths and stand-offs" };
+            var apply = Ui.Button("Apply", "Scale the whole design now (Undo brings it back)", (s, e) =>
+            {
+                double pc = scale.Value ?? 100;
+                if (Math.Abs(pc - 100) < 1e-6) return;
+                Change(() => SignScaling.Scale(_doc, pc / 100, depthsToo.IsChecked == true));
+                scale.Value = 100;
+                _preview.FitToView();
+            });
+            p.Children.Add(Ui.Pair(scale, apply));
+            p.Children.Add(depthsToo);
             return p;
+        }
+
+        static string SizesText(IEnumerable<int> sizes) => string.Join(", ", sizes);
+
+        static List<int> ParseSizes(string text)
+        {
+            var sizes = (text ?? "").Split(new[] { ',', ';', ' ', '%', '/' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(t => double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? (int)Math.Round(v) : 0)
+                .Where(v => v >= 5 && v <= 1000).Distinct().OrderBy(v => v).ToList();
+            if (sizes.Count == 0) sizes.Add(100);
+            return sizes;
         }
 
         NumberField Num(string label, string unit, Action<double> set, double step, double min, double max, int decimals, string tip = null)
@@ -161,6 +202,7 @@ namespace BGSignage.Engine.UI
             _ruleD.Value = _doc.Build.RuleDepth; _ruleS.Value = _doc.Build.RuleStandoff;
             _hosting.SelectedIndex = (int)_doc.Build.Hosting;
             _origin.SelectedIndex = (int)_doc.Build.Origin;
+            if (!_familySizes.IsKeyboardFocusWithin) _familySizes.Text = SizesText(_doc.Build.FamilySizes);
             foreach (var (slot, combo, swatch) in _materialRows)
             {
                 var m = slot == null ? _doc.Build.PanelMaterial : _doc.Build.For(slot.Value);

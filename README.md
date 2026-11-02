@@ -101,7 +101,7 @@ them out). Very large or tiny drawings are scaled to about a third of the sign; 
 
 ## The Revit family
 
-**Export to Revit** builds `<Family name>.rfa` (in *Documents\BG Signage* unless you choose another folder),
+**Export to Revit** builds `<Family name>.rfa` (in *Documents\BG Signage\Revit 20xx*, one folder per Revit version, unless you choose another folder),
 loads it into the project and starts placing it (untick *Place after export* to only load it). The designer
 minimises itself so your clicks go to Revit; **Sign Designer** on the ribbon brings it back.
 

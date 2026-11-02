@@ -25,9 +25,24 @@ namespace BGSignage.Engine.RevitExport
             if (doc.IsFamilyDocument) throw new InvalidOperationException("Switch to a project (not a family) to load the sign into.");
 
             string name = SafeName(sign.Name);
+            // A family saved by a newer Revit can't be opened by an older one, so each Revit version keeps its own
+            // folder, e.g. Documents\BG Signage\Revit 2025\Reception Sign.rfa.
+            folder = Path.Combine(folder, "Revit " + ui.Application.VersionNumber);
             Directory.CreateDirectory(folder);
             string rfa = Path.Combine(folder, name + ".rfa");
-            var built = FamilyBuilder.CreateFamilyFile(ui.Application, sign, rfa);
+
+            // Built in a fresh temporary file, then copied over: Revit never has to read an earlier file of that name.
+            string temp = Path.Combine(Path.GetTempPath(), "BGSignage-" + Guid.NewGuid().ToString("N"), name + ".rfa");
+            Directory.CreateDirectory(Path.GetDirectoryName(temp));
+            FamilyBuilder.Result built;
+            try
+            {
+                built = FamilyBuilder.CreateFamilyFile(ui.Application, sign, temp);
+                try { File.Copy(temp, rfa, true); }
+                catch (IOException) { rfa = Path.Combine(folder, name + " " + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".rfa"); File.Copy(temp, rfa, true); }
+            }
+            finally { try { Directory.Delete(Path.GetDirectoryName(temp), true); } catch { } }
+            foreach (var backup in Directory.GetFiles(folder, name + ".0*.rfa")) try { File.Delete(backup); } catch { }
             try { SignSerializer.Save(sign, Path.ChangeExtension(rfa, ".bgsign")); } catch { /* the family holds the design too */ }
 
             Family family;

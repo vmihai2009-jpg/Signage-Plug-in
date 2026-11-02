@@ -38,7 +38,7 @@ namespace BGSignage.Engine.UI
         UIElement BuildLeft()
         {
             var p = new StackPanel();
-            p.Children.Add(Ui.Title("Elements"));
+            p.Children.Add(Ui.Title("Layers"));
             _elements = new ListBox { Height = 170 };
             _elements.SelectionChanged += (s, e) =>
             {
@@ -46,7 +46,7 @@ namespace BGSignage.Engine.UI
                 if (_elements.SelectedItem is ListBoxItem item) Select((string)item.Tag);
             };
             p.Children.Add(_elements);
-            p.Children.Add(Ui.Note("Click an element in the preview or here; drag it in the preview to move it (Shift = 10 mm steps, Ctrl = straight, Alt = drag a copy), or nudge with the arrow keys. Tick Snap on the toolbar to land on the grid."));
+            p.Children.Add(Ui.Note("Click an element in the preview or here; drag it in the preview to move it (Shift = 10 mm steps, Ctrl = straight, Alt = drag a copy), or nudge with the arrow keys. Tick Snap on the toolbar to land on the grid. The padlock locks a layer so it can't be picked or moved in the preview."));
 
             p.Children.Add(Ui.Title("Sign"));
             _signName = new TextBox();

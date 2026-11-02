@@ -204,9 +204,11 @@ namespace BGSignage.Engine.UI
             foreach (var kv in _geometry.ElementBoxes)
             {
                 bool selected = kv.Key == SelectedId;
-                if (!selected && _doc.Rules.Any(r => r.Id == kv.Key)) continue;
+                bool locked = _doc.IsLocked(kv.Key);
+                if (!selected && (locked || _doc.Rules.Any(r => r.Id == kv.Key))) continue;
                 var box = Shape(new[] { kv.Value });
-                dc.DrawGeometry(null, selected ? Dashed(Color.FromRgb(0, 120, 215), 1.6) : Dashed(Color.FromArgb(60, 0, 90, 200)), box);
+                dc.DrawGeometry(null, !selected ? Dashed(Color.FromArgb(60, 0, 90, 200))
+                                      : locked ? Dashed(Color.FromRgb(150, 150, 150), 1.6) : Dashed(Color.FromRgb(0, 120, 215), 1.6), box);
             }
             dc.Pop();
 
@@ -215,6 +217,29 @@ namespace BGSignage.Engine.UI
             var label = new FormattedText($"{pr.Width:0} × {pr.Height:0} mm" + (panelOn ? $"  ·  panel {build.PanelThickness:0.#} mm" : "  ·  no backpanel"),
                 CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 12, Brushes.DimGray, 1.0);
             dc.DrawText(label, new Point(10, ActualHeight - 22));
+            DrawScaleBar(dc);
+        }
+
+        /// <summary>A scale bar in the bottom-right corner, a round length (1, 2 or 5 × 10ⁿ mm) about 120 px long.</summary>
+        void DrawScaleBar(DrawingContext dc)
+        {
+            if (_zoom <= 0 || ActualWidth < 200) return;
+            double target = 120 / _zoom, length = 1;
+            double p10 = Math.Pow(10, Math.Floor(Math.Log10(target)));
+            foreach (var m in new[] { 1.0, 2.0, 5.0, 10.0 }) if (m * p10 <= target) length = m * p10;
+            double px = length * _zoom;
+            string text = length >= 1000 ? $"{length / 1000:0.##} m" : $"{length:0.##} mm";
+
+            var ft = new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 11, Brushes.Black, 1.0);
+            double right = ActualWidth - 14 - ft.Width / 2, bottom = ActualHeight - 14, h = 6, left = right - px;
+            var zero = new FormattedText("0", CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 11, Brushes.Black, 1.0);
+            var back = new SolidColorBrush(Color.FromArgb(200, 255, 255, 255));
+            dc.DrawRoundedRectangle(back, null, new Rect(left - 10, bottom - h - ft.Height - 6, px + 20 + ft.Width / 2, h + ft.Height + 12), 3, 3);
+            var pen = new Pen(Brushes.Black, 1);
+            for (int i = 0; i < 4; i++)
+                dc.DrawRectangle(i % 2 == 0 ? Brushes.Black : Brushes.White, pen, new Rect(left + px * i / 4, bottom - h, px / 4, h));
+            dc.DrawText(zero, new Point(left - zero.Width / 2, bottom - h - zero.Height - 1));
+            dc.DrawText(ft, new Point(right - ft.Width / 2, bottom - h - ft.Height - 1));
         }
 
         Pen Dashed(Color c, double px = 1)
@@ -248,12 +273,13 @@ namespace BGSignage.Engine.UI
         {
             if (_geometry == null) return null;
             var p = new Vec2(mm.X, mm.Y);
-            if (SelectedId != null && _geometry.ElementBoxes.TryGetValue(SelectedId, out var sel) && Polygons.Contains(sel, p)) return SelectedId;
+            // Locked elements are not picked: clicks go through to what is underneath.
+            if (SelectedId != null && !_doc.IsLocked(SelectedId) && _geometry.ElementBoxes.TryGetValue(SelectedId, out var sel) && Polygons.Contains(sel, p)) return SelectedId;
             // Rules first (they are thin), then the smallest frame that contains the point.
             foreach (var r in _doc.Rules)
-                if (_geometry.ElementBoxes.TryGetValue(r.Id, out var box) && Polygons.Contains(box, p)) return r.Id;
+                if (!r.Locked && _geometry.ElementBoxes.TryGetValue(r.Id, out var box) && Polygons.Contains(box, p)) return r.Id;
             return _geometry.ElementBoxes
-                .Where(kv => Polygons.Contains(kv.Value, p))
+                .Where(kv => !_doc.IsLocked(kv.Key) && Polygons.Contains(kv.Value, p))
                 .OrderBy(kv => Math.Abs(Polygons.SignedArea(kv.Value)))
                 .Select(kv => kv.Key).FirstOrDefault();
         }

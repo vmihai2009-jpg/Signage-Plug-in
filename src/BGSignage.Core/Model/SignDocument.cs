@@ -70,6 +70,16 @@ namespace BGSignage.Core.Model
             return this;
         }
 
+        public bool IsLocked(string id) =>
+            id != null && (Frames.Any(f => f.Id == id && f.Locked) || Rules.Any(r => r.Id == id && r.Locked) || Graphics.Any(g => g.Id == id && g.Locked));
+
+        public void SetLocked(string id, bool locked)
+        {
+            foreach (var f in Frames) if (f.Id == id) f.Locked = locked;
+            foreach (var r in Rules) if (r.Id == id) r.Locked = locked;
+            foreach (var g in Graphics) if (g.Id == id) g.Locked = locked;
+        }
+
         public static string NewId() => Guid.NewGuid().ToString("N").Substring(0, 8);
     }
 
@@ -283,6 +293,8 @@ namespace BGSignage.Core.Model
         [DataMember(Order = 6)] public string Text { get; set; } = "";
         [DataMember(Order = 7)] public List<TextRun> Runs { get; set; } = new List<TextRun>();
         [DataMember(Order = 8)] public List<ParagraphFormat> Paragraphs { get; set; } = new List<ParagraphFormat>();
+        /// <summary>Locked: cannot be picked or moved in the preview (still editable from the Elements list).</summary>
+        [DataMember(Order = 9)] public bool Locked { get; set; }
 
         public int ParagraphCount => (Text ?? "").Count(c => c == '\n') + 1;
 
@@ -371,6 +383,7 @@ namespace BGSignage.Core.Model
         [DataMember(Order = 5)] public double AngleDeg { get; set; }
         [DataMember(Order = 6)] public double WeightMm { get; set; } = 4;
         [DataMember(Order = 7)] public MaterialSlot Material { get; set; } = MaterialSlot.Rules;
+        [DataMember(Order = 8)] public bool Locked { get; set; }
 
         public RuleElement Clone() => (RuleElement)MemberwiseClone();
     }
@@ -426,6 +439,7 @@ namespace BGSignage.Core.Model
         [DataMember(Order = 10)] public List<GraphicPath> Paths { get; set; } = new List<GraphicPath>();
         [DataMember(Order = 11)] public double NativeWidth { get; set; }
         [DataMember(Order = 12)] public double NativeHeight { get; set; }
+        [DataMember(Order = 13)] public bool Locked { get; set; }
 
         /// <summary>Builds a graphic from paths in any position, moving their top-left corner to (0,0).</summary>
         public static GraphicElement FromPaths(string name, string source, IEnumerable<(Geometry.Vec2[] Points, bool Closed)> paths)

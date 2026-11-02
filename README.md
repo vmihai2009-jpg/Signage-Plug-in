@@ -40,7 +40,8 @@ Downloads folder, the button reads **Update ready**.
 
 The window has four areas:
 
-- **Left – Elements and Sign.** The list of text frames, rules (bars/rails) and graphics; the family name;
+- **Left – Layers and Sign.** The list of text frames, rules (bars/rails) and graphics, each with a **padlock**
+  (locked layers can't be picked, moved or deleted in the preview; select them in the list to edit them); the family name;
   the backpanel (on/off, rectangle or ellipse, fixed size or *fit to content + padding*, corner radius);
   construction (panel thickness, letter depth, letter stand-off, rule depth, rule stand-off); the four materials
   (Panel, Letters, Accent, Rules); how the family is hosted (**face based** by default); the family **sizes**; and
@@ -49,7 +50,7 @@ The window has four areas:
   **drag to move any element** (Shift = 10 mm steps, Ctrl = straight, **Alt = drag a copy**), arrow keys nudge by
   1 mm (Shift = 10 mm). Tick **Snap** on the toolbar to make elements land on the grid (choose the spacing next to it;
   the arrow keys then move one grid step),
-  mouse wheel zooms, right-drag pans, **Fit** zooms to the sign. Under it is the **text box** for the selected frame
+  mouse wheel zooms (the **scale bar** bottom right follows the zoom), right-drag pans, **Fit** zooms to the sign. Under it is the **text box** for the selected frame
   (Enter = new paragraph).
 - **Right – Character / Paragraph / Position**, modelled on InDesign's panels.
 - **Top – toolbar**: templates, open/save `.bgsign`, undo/redo, add text / rule / graphic, duplicate, delete,

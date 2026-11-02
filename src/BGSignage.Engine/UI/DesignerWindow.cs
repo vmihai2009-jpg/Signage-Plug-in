@@ -380,6 +380,15 @@ namespace BGSignage.Engine.UI
         void OnPreviewKey(object sender, KeyEventArgs e)
         {
             if (_selId == null) return;
+            if (_doc.IsLocked(_selId))
+            {
+                if (e.Key == Key.Left || e.Key == Key.Right || e.Key == Key.Up || e.Key == Key.Down || e.Key == Key.Delete)
+                {
+                    _status.Text = "This element is locked. Unlock it in the Elements list to move or delete it.";
+                    e.Handled = true;
+                }
+                return;
+            }
             double step = _settings.SnapToGrid ? _preview.GridMm * (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1)
                         : Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1;
             double dx = e.Key == Key.Left ? -step : e.Key == Key.Right ? step : 0;
@@ -427,6 +436,7 @@ namespace BGSignage.Engine.UI
 
         void DragTo(string id, double dx, double dy)
         {
+            if (_doc.IsLocked(id)) return;
             if (_dragOrigin == null || !_dragOrigin.TryGetValue(id, out var o)) return;
             var now = PositionOf(id);
             if (now == null) return;
@@ -481,20 +491,20 @@ namespace BGSignage.Engine.UI
             if (_doc.Frames.FirstOrDefault(x => x.Id == id) is TextFrame f)
             {
                 var copy = SignSerializer.FromJson(SignSerializer.ToJson(new SignDocument { Frames = { f } })).Frames[0];
-                copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += dx; copy.Y += dy;
+                copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += dx; copy.Y += dy; copy.Locked = false;
                 _doc.Frames.Insert(_doc.Frames.IndexOf(f) + 1, copy);
                 return copy.Id;
             }
             if (_doc.Rules.FirstOrDefault(x => x.Id == id) is RuleElement r)
             {
-                var copy = r.Clone(); copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += dx; copy.Y += dy;
+                var copy = r.Clone(); copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += dx; copy.Y += dy; copy.Locked = false;
                 _doc.Rules.Insert(_doc.Rules.IndexOf(r) + 1, copy);
                 return copy.Id;
             }
             if (_doc.Graphics.FirstOrDefault(x => x.Id == id) is GraphicElement g)
             {
                 var copy = SignSerializer.FromJson(SignSerializer.ToJson(new SignDocument { Graphics = { g } })).Graphics[0];
-                copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += dx; copy.Y += dy;
+                copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += dx; copy.Y += dy; copy.Locked = false;
                 _doc.Graphics.Insert(_doc.Graphics.IndexOf(g) + 1, copy);
                 return copy.Id;
             }
@@ -504,6 +514,7 @@ namespace BGSignage.Engine.UI
         void DeleteSelected()
         {
             if (_selId == null) return;
+            if (_doc.IsLocked(_selId)) { _status.Text = "This element is locked. Unlock it in the Elements list to delete it."; return; }
             var id = _selId;
             Change(() =>
             {
@@ -517,10 +528,11 @@ namespace BGSignage.Engine.UI
         void SyncElementList()
         {
             if (_elements == null) return;
-            var wanted = _doc.Frames.Select(f => (f.Id, "T   " + f.Name + "  –  " + Short(f.Text)))
-                .Concat(_doc.Rules.Select(r => (r.Id, "—   " + r.Name)))
-                .Concat(_doc.Graphics.Select(g => (g.Id, "◆   " + g.Name))).ToList();
-            bool same = _elements.Items.Count == wanted.Count && wanted.Select((w, i) => ((ListBoxItem)_elements.Items[i]).Tag as string == w.Item1 && (string)((ListBoxItem)_elements.Items[i]).Content == w.Item2).All(x => x);
+            var wanted = _doc.Frames.Select(f => (f.Id, "T   " + f.Name + "  –  " + Short(f.Text), f.Locked))
+                .Concat(_doc.Rules.Select(r => (r.Id, "—   " + r.Name, r.Locked)))
+                .Concat(_doc.Graphics.Select(g => (g.Id, "◆   " + g.Name, g.Locked))).ToList();
+            var keys = wanted.Select(w => w.Item1 + "|" + w.Item2 + "|" + w.Item3).ToList();
+            bool same = _elementKeys.SequenceEqual(keys);
             var wasLoading = _loading;
             _loading = true;
             try
@@ -528,11 +540,33 @@ namespace BGSignage.Engine.UI
                 if (!same)
                 {
                     _elements.Items.Clear();
-                    foreach (var (id, label) in wanted) _elements.Items.Add(new ListBoxItem { Tag = id, Content = label });
+                    foreach (var (id, label, locked) in wanted) _elements.Items.Add(ElementRow(id, label, locked));
+                    _elementKeys = keys;
                 }
                 _elements.SelectedItem = _elements.Items.Cast<ListBoxItem>().FirstOrDefault(i => (string)i.Tag == _selId);
             }
             finally { _loading = wasLoading; }
+        }
+
+        List<string> _elementKeys = new List<string>();
+
+        /// <summary>One row of the Elements list: a lock button and the element's name.</summary>
+        ListBoxItem ElementRow(string id, string label, bool locked)
+        {
+            var lockBtn = new Button
+            {
+                Content = locked ? "🔒" : "🔓", Width = 24, Height = 20, Padding = new Thickness(0), Margin = new Thickness(0, 0, 6, 0),
+                FontFamily = new FontFamily("Segoe UI Emoji"), FontSize = 11,
+                Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+                Opacity = locked ? 1 : 0.35, Focusable = false,
+                ToolTip = locked ? "Locked: can't be picked or moved in the preview. Click to unlock." : "Click to lock, so it can't be picked or moved in the preview",
+            };
+            lockBtn.Click += (s, e) => { Change(() => _doc.SetLocked(id, !locked)); e.Handled = true; };
+            var row = new DockPanel();
+            DockPanel.SetDock(lockBtn, Dock.Left);
+            row.Children.Add(lockBtn);
+            row.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Foreground = locked ? Ui.Muted : Brushes.Black });
+            return new ListBoxItem { Tag = id, Content = row, Padding = new Thickness(2, 1, 2, 1) };
         }
 
         static string Short(string s)

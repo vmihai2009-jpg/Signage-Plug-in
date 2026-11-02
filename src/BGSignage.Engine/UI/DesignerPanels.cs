@@ -199,7 +199,11 @@ namespace BGSignage.Engine.UI
         UIElement MaterialRow(string label, Func<MaterialRef> Get, Action<MaterialRef> Set, string tip = null)
         {
             var combo = new ComboBox { IsEditable = true, MinHeight = 24, IsTextSearchEnabled = true, ToolTip = tip };
-            foreach (var m in _projectMaterials) combo.Items.Add(m.Name);
+            // A big project has hundreds of materials: fill the list only when it is first used.
+            bool filled = false;
+            void Fill() { if (filled) return; filled = true; foreach (var m in _projectMaterials) combo.Items.Add(m.Name); }
+            combo.DropDownOpened += (s, e) => Fill();
+            combo.GotKeyboardFocus += (s, e) => Fill();
             var swatch = new Button { Width = 24, Height = 22, Margin = new Thickness(4, 0, 0, 0), ToolTip = "Colour shown in the preview (click to change)" };
             var current = Get();
             combo.Text = current?.Name ?? "";

@@ -155,10 +155,17 @@ namespace BGSignage.Engine.UI
             bar.Children.Add(Ui.Button("+ Text", "Add a text frame", (s, e) => AddFrame()));
             bar.Children.Add(Ui.Button("+ Rule", "Add a bar or rail (any angle)", (s, e) => AddRule()));
             bar.Children.Add(Ui.Button("+ Graphic…", "Import a logo or graphic from .dwg, .dxf, .ai or .pdf", (s, e) => ImportGraphic()));
+            // A grid of tiles: each symbol drawn above its name.
             var symbolsMenu = new ContextMenu();
+            var tiles = new FrameworkElementFactory(typeof(UniformGrid));
+            tiles.SetValue(UniformGrid.ColumnsProperty, 4);
+            symbolsMenu.ItemsPanel = new ItemsPanelTemplate(tiles);
             foreach (var name in Symbols.Names)
             {
-                var item = new MenuItem { Header = name };
+                var tile = new StackPanel { Width = 84, Margin = new Thickness(0, 4, 0, 4) };
+                tile.Children.Add(SymbolIcon(name, 40));
+                tile.Children.Add(new TextBlock { Text = name, FontSize = 10.5, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+                var item = new MenuItem { Header = tile, ToolTip = "Add " + name };
                 item.Click += (s, e) => AddSymbol(name);
                 symbolsMenu.Items.Add(item);
             }
@@ -219,6 +226,7 @@ namespace BGSignage.Engine.UI
             _preview.ElementDoubleClicked += id => { Select(id); if (Frame != null) _editor.Focus(); };
             _preview.DragStarted += id => StartDrag(id);
             _preview.Dragging += (id, dx, dy) => DragTo(id, dx, dy);
+            _preview.DragEnded += EndDrag;
             _preview.PointerMoved += p => _pointer.Text = $"x {p.X:0}  y {p.Y:0} mm";
             _preview.KeyDown += OnPreviewKey;
             var frame = new Border { BorderBrush = Ui.Border, BorderThickness = new Thickness(1), Child = _preview };
@@ -398,7 +406,24 @@ namespace BGSignage.Engine.UI
             if ((DateTime.Now - _lastTyping).TotalSeconds > 1.5) Snapshot();
             _lastTyping = DateTime.Now;
             TextEditing.SetText(Frame, _editor.Text);
-            Rebuild(false);
+            ScheduleRebuild();
+        }
+
+        bool _rebuildPending;
+
+        /// <summary>
+        /// Redraws once the window has caught up with the mouse and keyboard, instead of on every key press or
+        /// mouse move: fast typing and dragging no longer queue up dozens of full rebuilds.
+        /// </summary>
+        void ScheduleRebuild()
+        {
+            if (_rebuildPending) return;
+            _rebuildPending = true;
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+            {
+                _rebuildPending = false;
+                Rebuild(false);
+            }));
         }
 
         int SelStart => _editor.SelectionStart;
@@ -520,6 +545,12 @@ namespace BGSignage.Engine.UI
                 var cur = PositionOf(kv.Key);
                 if (cur != null) MoveBy(kv.Key, kv.Value.X + mx - cur.Value.X, kv.Value.Y + my - cur.Value.Y);
             }
+            ScheduleRebuild(); // the Position panel catches up when the drag ends
+        }
+
+        void EndDrag()
+        {
+            _dragOrigin = null;
             Rebuild(false);
             _loading = true;
             try { BuildPositionPanel(); } finally { _loading = false; }
@@ -721,6 +752,32 @@ namespace BGSignage.Engine.UI
                 AddGraphic(g, null);
             }
             catch (Exception ex) { MessageBox.Show(this, ex.Message, "Import graphic"); }
+        }
+
+        /// <summary>The symbol drawn as it will be built, in a square of the given size.</summary>
+        static UIElement SymbolIcon(string name, double size)
+        {
+            var sign = new SignDocument();
+            sign.Panel.Enabled = false;
+            sign.Graphics.Add(Symbols.Create(name, 100));
+            var built = SignBuilder.Build(sign.Normalise(), WpfFontProvider.Instance, 0.5);
+            var group = new GeometryGroup { FillRule = FillRule.Nonzero };
+            foreach (var piece in built.Pieces)
+            {
+                var sg = new StreamGeometry { FillRule = FillRule.EvenOdd };
+                using (var ctx = sg.Open())
+                    foreach (var loop in piece.Loops.Where(l => l.Length >= 3))
+                    {
+                        ctx.BeginFigure(new Point(loop[0].X, loop[0].Y), true, true);
+                        ctx.PolyLineTo(loop.Skip(1).Select(v => new Point(v.X, v.Y)).ToList(), false, false);
+                    }
+                sg.Freeze();
+                group.Children.Add(sg);
+            }
+            group.Freeze();
+            var canvas = new Canvas { Width = 100, Height = 100 };
+            canvas.Children.Add(new System.Windows.Shapes.Path { Data = group, Fill = Brushes.Black });
+            return new Viewbox { Width = size, Height = size, Child = canvas, HorizontalAlignment = HorizontalAlignment.Center };
         }
 
         void AddSymbol(string name)

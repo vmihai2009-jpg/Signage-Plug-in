@@ -404,7 +404,8 @@ namespace BGSignage.Engine.RevitExport
                 {
                     var e = fam.FamilyCreate.NewExtrusion(true, profile, sketch, Ft(Math.Max(front, back + 0.5)));
                     e.get_Parameter(BuiltInParameter.EXTRUSION_START_PARAM)?.Set(Ft(back));
-                    fam.Regenerate();
+                    // No regeneration per solid (it made big signs very slow); a solid Revit can't build is
+                    // removed when the family is committed.
                     st.Commit();
                     return e;
                 }

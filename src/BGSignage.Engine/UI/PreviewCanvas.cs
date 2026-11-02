@@ -53,6 +53,7 @@ namespace BGSignage.Engine.UI
         public event Action<string> ElementDoubleClicked;
         /// <summary>A drag is starting. The window may answer with <see cref="RetargetDrag"/> (Alt-drag drags a copy).</summary>
         public event Action<string> DragStarted;
+        public event Action DragEnded;
         /// <summary>Total movement in mm since the drag started (snapped to whole millimetres).</summary>
         public event Action<string, double, double> Dragging;
         public event Action<Point> PointerMoved;
@@ -143,11 +144,18 @@ namespace BGSignage.Engine.UI
         Matrix SignToScreen => new Matrix(_zoom, 0, 0, _zoom, _pan.X, _pan.Y);
         Point ToMm(Point screen) => new Point((screen.X - _pan.X) / _zoom, (screen.Y - _pan.Y) / _zoom);
 
+        static readonly Dictionary<int, Brush> Brushes_ = new Dictionary<int, Brush>();
+
+        /// <summary>One frozen brush per colour and shade, reused on every redraw.</summary>
         static Brush Fill(MaterialRef m, double shade = 1)
         {
             var c = m == null ? Color.FromRgb(60, 60, 60) : Color.FromRgb(m.R, m.G, m.B);
-            var b = new SolidColorBrush(Color.FromRgb((byte)(c.R * shade), (byte)(c.G * shade), (byte)(c.B * shade)));
+            var shaded = Color.FromRgb((byte)(c.R * shade), (byte)(c.G * shade), (byte)(c.B * shade));
+            int key = (shaded.R << 16) | (shaded.G << 8) | shaded.B;
+            if (Brushes_.TryGetValue(key, out var b)) return b;
+            b = new SolidColorBrush(shaded);
             b.Freeze();
+            Brushes_[key] = b;
             return b;
         }
 
@@ -188,7 +196,7 @@ namespace BGSignage.Engine.UI
                         }
                     }
                     double depthPx = (front - back) * _zoom;
-                    int steps = (int)Math.Max(1, Math.Min(40, Math.Ceiling(depthPx)));
+                    int steps = (int)Math.Max(1, Math.Min(12, Math.Ceiling(depthPx / 2)));
                     var side = Fill(m, 0.62);
                     for (int i = 0; i < steps; i++)
                     {
@@ -389,7 +397,9 @@ namespace BGSignage.Engine.UI
             }
             if (e.ChangedButton == MouseButton.Left)
             {
+                bool wasDragging = _dragging;
                 _dragId = null; _dragging = false; DragIsCopy = false;
+                if (wasDragging) DragEnded?.Invoke();
                 Cursor = Cursors.Arrow;
                 if (IsMouseCaptured) ReleaseMouseCapture();
             }

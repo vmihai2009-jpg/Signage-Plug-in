@@ -47,7 +47,7 @@ The window has four areas:
   (Panel, Letters, Accent, Rules); how the family is hosted (**face based** by default); the family **sizes**; and
   **Scale whole sign** (resize the whole design by a percentage, with or without the thicknesses).
 - **Middle – Preview.** Live as you type. **3D view** shows depth, stand-off and shadows. Click to select,
-  **drag to move any element** (Shift = 10 mm steps, Ctrl = straight, **Alt = drag a copy**), arrow keys nudge by
+  **drag to move any element** (**Shift = straight** across or up/down like InDesign, Ctrl = 10 mm steps, **Alt = drag a copy**), arrow keys nudge by
   1 mm (Shift = 10 mm). Tick **Snap** on the toolbar to make elements land on the grid (choose the spacing next to it;
   the arrow keys then move one grid step),
   mouse wheel zooms (the **scale bar** bottom right follows the zoom), right-drag pans, **Fit** zooms to the sign. Under it is the **text box** for the selected frame

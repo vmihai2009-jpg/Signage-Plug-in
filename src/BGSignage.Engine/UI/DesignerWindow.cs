@@ -444,7 +444,7 @@ namespace BGSignage.Engine.UI
             if (_settings.SnapToGrid)
             {
                 // The element's own position (frame: left / top of capitals; rule: its start; graphic: its anchor)
-                // lands on a gridline. An axis held still with Ctrl is left where it was.
+                // lands on a gridline. An axis held still with Shift is left where it was.
                 double g = _preview.GridMm > 0 ? _preview.GridMm : 10;
                 if (dx != 0) x = Math.Round(x / g) * g;
                 if (dy != 0) y = Math.Round(y / g) * g;

@@ -327,10 +327,11 @@ namespace BGSignage.Engine.UI
                 if (DragIsCopy) Cursor = Cursors.Cross;
                 DragStarted?.Invoke(_dragId);
             }
-            double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1;
+            // Like InDesign: Shift keeps the move horizontal or vertical (whichever is larger). Ctrl = 10 mm steps.
+            double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ? 10 : 1;
             double dx = Math.Round((mm.X - _dragStartMm.X) / step) * step;
             double dy = Math.Round((mm.Y - _dragStartMm.Y) / step) * step;
-            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) { if (Math.Abs(dx) > Math.Abs(dy)) dy = 0; else dx = 0; }
+            if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) { if (Math.Abs(dx) > Math.Abs(dy)) dy = 0; else dx = 0; }
             Dragging?.Invoke(_dragId, dx, dy);
             _lastMm = mm;
         }

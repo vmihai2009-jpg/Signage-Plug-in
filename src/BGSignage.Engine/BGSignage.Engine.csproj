@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The "engine": the Sign Designer window, the text layout and the Revit family builder. The launcher loads
+       the newest installed copy on each click, so an update takes effect without restarting Revit.
+       It is ONE dll (the shared Core code is compiled in) and has no XAML, so a newer copy can always be
+       loaded next to an older one in the same Revit session. -->
+  <PropertyGroup>
+    <TargetFramework>$(RevitTargetFramework)</TargetFramework>
+    <OutputType>Library</OutputType>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>BGSignage.Engine</AssemblyName>
+    <RootNamespace>BGSignage.Engine</RootNamespace>
+    <!-- The release version. CI sets it from the tag (v0.2.0 -> 0.2.0). -->
+    <Version>0.1.0</Version>
+    <Version Condition="'$(EngineVersion)' != ''">$(EngineVersion)</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\BGSignage.Core\**\*.cs" Link="Core\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPI" Version="$(RevitApiVersion)" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Nice3point.Revit.Api.RevitAPIUI" Version="$(RevitApiVersion)" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- WPF and WinForms by reference (no XAML is compiled), which also lets the build run on any OS. -->
+  <ItemGroup Condition="'$(TargetFramework)' != 'net48'">
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+</Project>

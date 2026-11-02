@@ -1,0 +1,49 @@
+<Project>
+  <!-- One build configuration per Revit version: Release-R2024 (.NET Framework 4.8), Release-R2025 and
+       Release-R2026 (.NET 8). Debug-R20xx starts Revit for debugging. -->
+  <PropertyGroup>
+    <Configurations>Debug-R2024;Release-R2024;Debug-R2025;Release-R2025;Debug-R2026;Release-R2026</Configurations>
+    <Platforms>AnyCPU</Platforms>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    <Authors>Barr Gazetas</Authors>
+    <Company>Barr Gazetas</Company>
+    <Product>BG Signage</Product>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$(Configuration.Contains('R2024'))">
+    <RevitVersion>2024</RevitVersion>
+    <RevitTargetFramework>net48</RevitTargetFramework>
+    <RevitApiVersion>2024.3.60</RevitApiVersion>
+    <DefineConstants>$(DefineConstants);REVIT2024</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="$(Configuration.Contains('R2025'))">
+    <RevitVersion>2025</RevitVersion>
+    <RevitTargetFramework>net8.0-windows</RevitTargetFramework>
+    <RevitApiVersion>2025.4.60</RevitApiVersion>
+    <DefineConstants>$(DefineConstants);REVIT2025</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="$(Configuration.Contains('R2026'))">
+    <RevitVersion>2026</RevitVersion>
+    <RevitTargetFramework>net8.0-windows</RevitTargetFramework>
+    <RevitApiVersion>2026.4.10</RevitApiVersion>
+    <DefineConstants>$(DefineConstants);REVIT2026</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$(Configuration.StartsWith('Debug'))">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <DefineConstants>$(DefineConstants);DEBUG;TRACE</DefineConstants>
+    <StartAction>Program</StartAction>
+    <StartProgram>$(ProgramW6432)\Autodesk\Revit $(RevitVersion)\Revit.exe</StartProgram>
+  </PropertyGroup>
+  <PropertyGroup Condition="$(Configuration.StartsWith('Release'))">
+    <DebugType>portable</DebugType>
+    <Optimize>true</Optimize>
+    <DefineConstants>$(DefineConstants);TRACE</DefineConstants>
+  </PropertyGroup>
+</Project>

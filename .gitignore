@@ -1,0 +1,34 @@
+## .NET / Visual Studio
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+*.cache
+*.vs/
+.vs/
+*.DotSettings.user
+
+## Build outputs
+*.dll
+*.pdb
+*.exe
+
+## Release packaging (produced by CI)
+staging/
+*.zip
+
+## NuGet
+packages/
+*.nupkg
+
+## Test results
+[Tt]est[Rr]esults/
+
+## OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+
+

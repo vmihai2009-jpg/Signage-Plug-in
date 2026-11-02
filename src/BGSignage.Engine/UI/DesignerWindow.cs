@@ -1,0 +1,594 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using UIApplication = Autodesk.Revit.UI.UIApplication;
+using TaskDialog = Autodesk.Revit.UI.TaskDialog;
+using BGSignage.Core.Editing;
+using BGSignage.Core.Import;
+using BGSignage.Core.Layout;
+using BGSignage.Core.Model;
+using BGSignage.Engine.RevitExport;
+
+namespace BGSignage.Engine.UI
+{
+    /// <summary>
+    /// The Sign Designer: elements and sign settings on the left, the live preview in the middle with the text
+    /// editor under it, and InDesign-style Character / Paragraph / Position panels on the right.
+    /// </summary>
+    internal sealed partial class DesignerWindow : Window
+    {
+        static DesignerWindow _open;
+
+        readonly UIApplication _ui;
+        readonly List<MaterialRef> _projectMaterials;
+        readonly DesignerSettings _settings = DesignerSettings.Load();
+        SignDocument _doc;
+        string _selId;
+        SignGeometry _geometry;
+        bool _loading;
+
+        readonly List<string> _undo = new List<string>(), _redo = new List<string>();
+        DateTime _lastTyping = DateTime.MinValue;
+        Dictionary<string, (double X, double Y)> _dragOrigin;
+
+        // Main areas
+        PreviewCanvas _preview;
+        TextBox _editor;
+        TextBlock _editorHint, _status, _pointer;
+        ListBox _elements;
+        StackPanel _positionPanel;
+        TabControl _tabs;
+        TabItem _charTab, _paraTab, _posTab;
+        ToggleButton _view3d;
+        CheckBox _placeAfter;
+
+        public static void Open(UIApplication ui, SignDocument sign, List<MaterialRef> materials)
+        {
+            if (_open != null && _open.IsLoaded)
+            {
+                if (sign != null) _open.Load(sign, "Opened from the model");
+                _open.Activate();
+                return;
+            }
+            _open = new DesignerWindow(ui, sign ?? Presets.Create(Presets.Names[0]), materials ?? new List<MaterialRef>());
+            _open.Closed += (s, e) => _open = null;
+            _open.Show();
+        }
+
+        DesignerWindow(UIApplication ui, SignDocument sign, List<MaterialRef> materials)
+        {
+            _ui = ui;
+            _projectMaterials = materials;
+            _doc = sign.Normalise();
+            Title = "BG Signage – Sign Designer";
+            Width = 1440; Height = 900; MinWidth = 1100; MinHeight = 700;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            Background = Ui.PanelBack;
+            FontFamily = new FontFamily("Segoe UI");
+            FontSize = 12;
+            try { new WindowInteropHelper(this).Owner = ui.MainWindowHandle; } catch { }
+
+            Content = BuildLayout();
+            PreviewKeyDown += OnWindowKey;
+            Loaded += (s, e) =>
+            {
+                _selId = _doc.Frames.FirstOrDefault()?.Id;
+                LoadEditor();
+                Rebuild(true);
+                _preview.FitToView();
+            };
+        }
+
+        // ------------------------------------------------------------------ layout
+
+        UIElement BuildLayout()
+        {
+            var root = new DockPanel();
+
+            var toolbar = BuildToolbar();
+            DockPanel.SetDock(toolbar, Dock.Top);
+            root.Children.Add(toolbar);
+
+            var statusBar = new DockPanel { Background = Brushes.WhiteSmoke, Height = 24 };
+            _pointer = new TextBlock { Margin = new Thickness(8, 4, 8, 0), Foreground = Ui.Muted, Width = 160 };
+            DockPanel.SetDock(_pointer, Dock.Right);
+            statusBar.Children.Add(_pointer);
+            _status = new TextBlock { Margin = new Thickness(8, 4, 8, 0), Foreground = Ui.Header, TextTrimming = TextTrimming.CharacterEllipsis };
+            statusBar.Children.Add(_status);
+            DockPanel.SetDock(statusBar, Dock.Bottom);
+            root.Children.Add(statusBar);
+
+            var left = new ScrollViewer { Width = 290, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = BuildLeft(), Padding = new Thickness(10, 0, 10, 10) };
+            DockPanel.SetDock(left, Dock.Left);
+            root.Children.Add(left);
+
+            _tabs = new TabControl { Width = 320, Margin = new Thickness(0, 6, 6, 6) };
+            _charTab = new TabItem { Header = "Character", Content = Scroll(BuildCharacterPanel()) };
+            _paraTab = new TabItem { Header = "Paragraph", Content = Scroll(BuildParagraphPanel()) };
+            _positionPanel = new StackPanel { Margin = new Thickness(8) };
+            _posTab = new TabItem { Header = "Position", Content = Scroll(_positionPanel) };
+            _tabs.Items.Add(_charTab); _tabs.Items.Add(_paraTab); _tabs.Items.Add(_posTab);
+            DockPanel.SetDock(_tabs, Dock.Right);
+            root.Children.Add(_tabs);
+
+            root.Children.Add(BuildCentre());
+            return root;
+        }
+
+        static ScrollViewer Scroll(UIElement content) => new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+
+        UIElement BuildToolbar()
+        {
+            var bar = new WrapPanel { Margin = new Thickness(8, 6, 8, 6) };
+            var templates = Ui.Combo(Presets.Names.ToArray());
+            templates.SelectedIndex = 0; templates.Width = 250; templates.Margin = new Thickness(0, 0, 4, 0);
+            templates.ToolTip = "Starting points based on typical reception and wayfinding signs";
+            bar.Children.Add(templates);
+            bar.Children.Add(Ui.Button("New", "Start a new sign from the chosen template", (s, e) =>
+            {
+                if (MessageBox.Show(this, "Start a new sign? Unsaved changes to this one are lost (Undo brings them back).", "New sign", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+                Snapshot();
+                Load(Presets.Create((string)templates.SelectedItem), "New sign", keepUndo: true);
+            }));
+            bar.Children.Add(Ui.Button("Open…", "Open a saved sign (.bgsign)", (s, e) => OpenFile()));
+            bar.Children.Add(Ui.Button("Save…", "Save the sign design (.bgsign) to reuse or share", (s, e) => SaveFile()));
+            bar.Children.Add(Sep());
+            bar.Children.Add(Ui.Button("↶ Undo", "Undo (Ctrl+Z)", (s, e) => Undo()));
+            bar.Children.Add(Ui.Button("↷ Redo", "Redo (Ctrl+Y)", (s, e) => Redo()));
+            bar.Children.Add(Sep());
+            bar.Children.Add(Ui.Button("+ Text", "Add a text frame", (s, e) => AddFrame()));
+            bar.Children.Add(Ui.Button("+ Rule", "Add a bar or rail (any angle)", (s, e) => AddRule()));
+            bar.Children.Add(Ui.Button("+ Graphic…", "Import a logo or graphic from .dwg, .dxf, .ai or .pdf", (s, e) => ImportGraphic()));
+            bar.Children.Add(Ui.Button("Duplicate", "Duplicate the selected element (Ctrl+D)", (s, e) => DuplicateSelected()));
+            bar.Children.Add(Ui.Button("Delete", "Delete the selected element (Delete key in the preview)", (s, e) => DeleteSelected()));
+            bar.Children.Add(Sep());
+            _view3d = new ToggleButton { Content = "3D view", ToolTip = "Show depth, stand-off and shadows", Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(0, 0, 4, 0) };
+            _view3d.Click += (s, e) => { _preview.ThreeD = _view3d.IsChecked == true; _preview.InvalidateVisual(); };
+            bar.Children.Add(_view3d);
+            bar.Children.Add(Ui.Button("Fit", "Zoom to the whole sign", (s, e) => _preview.FitToView()));
+            var grid = new CheckBox { Content = "Grid", IsChecked = true, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 8, 0) };
+            grid.Click += (s, e) => { _preview.ShowGrid = grid.IsChecked == true; _preview.InvalidateVisual(); };
+            bar.Children.Add(grid);
+            bar.Children.Add(Sep());
+            bar.Children.Add(Ui.Button("Export to Revit", "Build the parametric sign family, load it into the project and place it", (s, e) => Export(), primary: true));
+            _placeAfter = new CheckBox { Content = "Place after export", IsChecked = _settings.PlaceAfterExport, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) };
+            _placeAfter.Click += (s, e) => { _settings.PlaceAfterExport = _placeAfter.IsChecked == true; _settings.Save(); };
+            bar.Children.Add(_placeAfter);
+            bar.Children.Add(Ui.Button("Folder…", "Where the .rfa families are saved", (s, e) => ChooseExportFolder()));
+            return bar;
+        }
+
+        static UIElement Sep() => new Border { Width = 1, Background = Ui.Border, Margin = new Thickness(6, 2, 8, 2) };
+
+        UIElement BuildCentre()
+        {
+            var grid = new Grid { Margin = new Thickness(0, 6, 6, 6) };
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(130) });
+
+            _preview = new PreviewCanvas();
+            _preview.ElementClicked += id => Select(id);
+            _preview.ElementDoubleClicked += id => { Select(id); if (Frame != null) _editor.Focus(); };
+            _preview.DragStarted += id => StartDrag(id);
+            _preview.Dragging += (id, dx, dy) => DragTo(id, dx, dy);
+            _preview.PointerMoved += p => _pointer.Text = $"x {p.X:0}  y {p.Y:0} mm";
+            _preview.KeyDown += OnPreviewKey;
+            var frame = new Border { BorderBrush = Ui.Border, BorderThickness = new Thickness(1), Child = _preview };
+            grid.Children.Add(frame);
+
+            var head = new DockPanel { Margin = new Thickness(0, 6, 0, 2) };
+            head.Children.Add(new TextBlock { Text = "TEXT", FontWeight = FontWeights.SemiBold, FontSize = 10.5, Foreground = Ui.Header, Margin = new Thickness(0, 0, 8, 0) });
+            _editorHint = new TextBlock { Foreground = Ui.Muted, FontSize = 11 };
+            head.Children.Add(_editorHint);
+            Grid.SetRow(head, 1);
+            grid.Children.Add(head);
+
+            _editor = new TextBox
+            {
+                AcceptsReturn = true, AcceptsTab = false, TextWrapping = TextWrapping.Wrap, FontSize = 15,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto, IsUndoEnabled = false,
+                IsInactiveSelectionHighlightEnabled = true, Padding = new Thickness(4),
+            };
+            _editor.TextChanged += OnEditorTextChanged;
+            _editor.SelectionChanged += (s, e) => { if (!_loading) RefreshTextPanels(); };
+            Grid.SetRow(_editor, 2);
+            grid.Children.Add(_editor);
+            return grid;
+        }
+
+        // ------------------------------------------------------------------ selection helpers
+
+        TextFrame Frame => _doc.Frames.FirstOrDefault(f => f.Id == _selId);
+        RuleElement Rule => _doc.Rules.FirstOrDefault(r => r.Id == _selId);
+        GraphicElement Graphic => _doc.Graphics.FirstOrDefault(g => g.Id == _selId);
+
+        void Select(string id)
+        {
+            if (_selId == id) return;
+            _selId = id;
+            _preview.SelectedId = id;
+            _preview.InvalidateVisual();
+            LoadEditor();
+            RefreshAllPanels();
+            SyncElementList();
+            if (Frame == null && id != null) _tabs.SelectedItem = _posTab;
+        }
+
+        // ------------------------------------------------------------------ undo / change
+
+        void Snapshot()
+        {
+            _undo.Add(SignSerializer.ToJson(_doc));
+            if (_undo.Count > 200) _undo.RemoveAt(0);
+            _redo.Clear();
+        }
+
+        /// <summary>Every edit goes through here: undo point, change, redraw.</summary>
+        void Change(Action action, bool refreshPanels = true)
+        {
+            if (_loading) return;
+            Snapshot();
+            action();
+            _doc.Normalise();
+            Rebuild(refreshPanels);
+        }
+
+        void Undo() => Step(_undo, _redo);
+        void Redo() => Step(_redo, _undo);
+
+        void Step(List<string> from, List<string> to)
+        {
+            if (from.Count == 0) return;
+            to.Add(SignSerializer.ToJson(_doc));
+            var json = from[from.Count - 1];
+            from.RemoveAt(from.Count - 1);
+            var sel = _selId;
+            _doc = SignSerializer.FromJson(json);
+            _selId = Exists(sel) ? sel : _doc.Frames.FirstOrDefault()?.Id;
+            LoadEditor();
+            Rebuild(true);
+        }
+
+        bool Exists(string id) => id != null && (_doc.Frames.Any(f => f.Id == id) || _doc.Rules.Any(r => r.Id == id) || _doc.Graphics.Any(g => g.Id == id));
+
+        void Load(SignDocument doc, string why, bool keepUndo = false)
+        {
+            if (!keepUndo) { _undo.Clear(); _redo.Clear(); }
+            _doc = doc.Normalise();
+            _selId = _doc.Frames.FirstOrDefault()?.Id;
+            LoadEditor();
+            Rebuild(true);
+            _preview.FitToView();
+            _status.Text = why;
+        }
+
+        /// <summary>Lays the sign out again and redraws everything that depends on it.</summary>
+        void Rebuild(bool refreshPanels)
+        {
+            try { _geometry = SignBuilder.Build(_doc, WpfFontProvider.Instance, 0.3); }
+            catch (Exception ex) { _status.Text = "Could not lay out the sign: " + ex.Message; return; }
+            _preview.SelectedId = _selId;
+            _preview.Show(_doc, _geometry);
+            SyncElementList();
+            if (refreshPanels) RefreshAllPanels();
+            var r = _geometry.PanelRect;
+            _status.Text = _geometry.Warnings.Count > 0
+                ? "⚠ " + string.Join("  ", _geometry.Warnings.Take(3))
+                : $"{_doc.Name}: {r.Width:0} × {r.Height:0} mm, {_geometry.Pieces.Count} solids";
+        }
+
+        void RefreshAllPanels()
+        {
+            _loading = true;
+            try
+            {
+                RefreshSignPanel();
+                RefreshTextPanels();
+                BuildPositionPanel();
+            }
+            finally { _loading = false; }
+        }
+
+        // ------------------------------------------------------------------ text editor
+
+        void LoadEditor()
+        {
+            _loading = true;
+            try
+            {
+                var f = Frame;
+                _editor.IsEnabled = f != null;
+                _editor.Text = f?.Text ?? "";
+                _editorHint.Text = f != null
+                    ? $"{f.Name}: type here (Enter = new paragraph). Select text, then use Character / Paragraph; with nothing selected a change applies to the whole line."
+                    : "Select a text frame in the preview or the list to edit its text.";
+            }
+            finally { _loading = false; }
+        }
+
+        void OnEditorTextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_loading || Frame == null) return;
+            // Typing makes one undo step per pause, not per key.
+            if ((DateTime.Now - _lastTyping).TotalSeconds > 1.5) Snapshot();
+            _lastTyping = DateTime.Now;
+            TextEditing.SetText(Frame, _editor.Text);
+            Rebuild(false);
+        }
+
+        int SelStart => _editor.SelectionStart;
+        int SelLength => _editor.SelectionLength;
+
+        void ApplyChar(Action<CharacterFormat> change)
+        {
+            var f = Frame;
+            if (f == null || _loading) return;
+            Change(() => TextEditing.ApplyCharacter(f, SelStart, SelLength, change));
+        }
+
+        void ApplyPara(Action<ParagraphFormat> change)
+        {
+            var f = Frame;
+            if (f == null || _loading) return;
+            Change(() => TextEditing.ApplyParagraph(f, SelStart, SelLength, change));
+        }
+
+        // ------------------------------------------------------------------ keys
+
+        void OnWindowKey(object sender, KeyEventArgs e)
+        {
+            bool ctrl = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+            if (ctrl && e.Key == Key.Z) { Undo(); e.Handled = true; }
+            else if (ctrl && e.Key == Key.Y) { Redo(); e.Handled = true; }
+            else if (ctrl && e.Key == Key.S) { SaveFile(); e.Handled = true; }
+            else if (ctrl && e.Key == Key.D) { DuplicateSelected(); e.Handled = true; }
+            else if (ctrl && e.Key == Key.B) { ApplyChar(c => c.Weight = c.Weight >= 600 ? 400 : 700); e.Handled = true; }
+            else if (ctrl && e.Key == Key.I) { ApplyChar(c => c.Italic = !c.Italic); e.Handled = true; }
+            else if (ctrl && e.Key == Key.U) { ApplyChar(c => c.Underline = !c.Underline); e.Handled = true; }
+        }
+
+        void OnPreviewKey(object sender, KeyEventArgs e)
+        {
+            if (_selId == null) return;
+            double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) ? 10 : 1;
+            double dx = e.Key == Key.Left ? -step : e.Key == Key.Right ? step : 0;
+            double dy = e.Key == Key.Up ? -step : e.Key == Key.Down ? step : 0;
+            if (dx != 0 || dy != 0) { Change(() => MoveBy(_selId, dx, dy)); e.Handled = true; }
+            else if (e.Key == Key.Delete) { DeleteSelected(); e.Handled = true; }
+        }
+
+        // ------------------------------------------------------------------ moving
+
+        void MoveBy(string id, double dx, double dy)
+        {
+            if (_doc.Frames.FirstOrDefault(x => x.Id == id) is TextFrame f) { f.X += dx; f.Y += dy; }
+            else if (_doc.Rules.FirstOrDefault(x => x.Id == id) is RuleElement r) { r.X += dx; r.Y += dy; }
+            else if (_doc.Graphics.FirstOrDefault(x => x.Id == id) is GraphicElement g) { g.X += dx; g.Y += dy; }
+        }
+
+        (double X, double Y)? PositionOf(string id)
+        {
+            if (_doc.Frames.FirstOrDefault(x => x.Id == id) is TextFrame f) return (f.X, f.Y);
+            if (_doc.Rules.FirstOrDefault(x => x.Id == id) is RuleElement r) return (r.X, r.Y);
+            if (_doc.Graphics.FirstOrDefault(x => x.Id == id) is GraphicElement g) return (g.X, g.Y);
+            return null;
+        }
+
+        void StartDrag(string id)
+        {
+            Snapshot();
+            var p = PositionOf(id);
+            _dragOrigin = p == null ? null : new Dictionary<string, (double, double)> { [id] = p.Value };
+        }
+
+        void DragTo(string id, double dx, double dy)
+        {
+            if (_dragOrigin == null || !_dragOrigin.TryGetValue(id, out var o)) return;
+            var now = PositionOf(id);
+            if (now == null) return;
+            MoveBy(id, o.X + dx - now.Value.X, o.Y + dy - now.Value.Y);
+            Rebuild(false);
+            _loading = true;
+            try { BuildPositionPanel(); } finally { _loading = false; }
+        }
+
+        // ------------------------------------------------------------------ elements
+
+        void AddFrame()
+        {
+            var fmt = Frame?.DefaultFormat?.Clone() ?? new CharacterFormat { FontFamily = Presets.DefaultFont, SizeMm = 50 };
+            var r = _geometry?.PanelRect ?? new Core.Geometry.Rect2(0, 0, 1000, 400);
+            var f = TextFrame.Create("Text " + (_doc.Frames.Count + 1), "NEW TEXT", fmt, new ParagraphFormat(), Math.Round(r.MinX + 50), Math.Round(r.Center.Y), 0);
+            Change(() => _doc.Frames.Add(f));
+            Select(f.Id);
+            _editor.Focus();
+            _editor.SelectAll();
+        }
+
+        void AddRule()
+        {
+            var r = _geometry?.PanelRect ?? new Core.Geometry.Rect2(0, 0, 1000, 400);
+            var rule = new RuleElement { Name = "Rule " + (_doc.Rules.Count + 1), X = Math.Round(r.MinX + 50), Y = Math.Round(r.MaxY - 50), Length = Math.Round(Math.Max(100, r.Width - 100)), WeightMm = 4 };
+            Change(() => _doc.Rules.Add(rule));
+            Select(rule.Id);
+        }
+
+        void DuplicateSelected()
+        {
+            string newId = null;
+            if (Frame != null)
+            {
+                var copy = SignSerializer.FromJson(SignSerializer.ToJson(new SignDocument { Frames = { Frame } })).Frames[0];
+                copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.Y += 60;
+                Change(() => _doc.Frames.Add(copy)); newId = copy.Id;
+            }
+            else if (Rule != null)
+            {
+                var copy = Rule.Clone(); copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.Y += 40;
+                Change(() => _doc.Rules.Add(copy)); newId = copy.Id;
+            }
+            else if (Graphic != null)
+            {
+                var copy = SignSerializer.FromJson(SignSerializer.ToJson(new SignDocument { Graphics = { Graphic } })).Graphics[0];
+                copy.Id = SignDocument.NewId(); copy.Name += " copy"; copy.X += 40; copy.Y += 40;
+                Change(() => _doc.Graphics.Add(copy)); newId = copy.Id;
+            }
+            if (newId != null) Select(newId);
+        }
+
+        void DeleteSelected()
+        {
+            if (_selId == null) return;
+            var id = _selId;
+            Change(() =>
+            {
+                _doc.Frames.RemoveAll(f => f.Id == id);
+                _doc.Rules.RemoveAll(r => r.Id == id);
+                _doc.Graphics.RemoveAll(g => g.Id == id);
+            });
+            Select(_doc.Frames.FirstOrDefault()?.Id);
+        }
+
+        void SyncElementList()
+        {
+            if (_elements == null) return;
+            var wanted = _doc.Frames.Select(f => (f.Id, "T   " + f.Name + "  –  " + Short(f.Text)))
+                .Concat(_doc.Rules.Select(r => (r.Id, "—   " + r.Name)))
+                .Concat(_doc.Graphics.Select(g => (g.Id, "◆   " + g.Name))).ToList();
+            bool same = _elements.Items.Count == wanted.Count && wanted.Select((w, i) => ((ListBoxItem)_elements.Items[i]).Tag as string == w.Item1 && (string)((ListBoxItem)_elements.Items[i]).Content == w.Item2).All(x => x);
+            var wasLoading = _loading;
+            _loading = true;
+            try
+            {
+                if (!same)
+                {
+                    _elements.Items.Clear();
+                    foreach (var (id, label) in wanted) _elements.Items.Add(new ListBoxItem { Tag = id, Content = label });
+                }
+                _elements.SelectedItem = _elements.Items.Cast<ListBoxItem>().FirstOrDefault(i => (string)i.Tag == _selId);
+            }
+            finally { _loading = wasLoading; }
+        }
+
+        static string Short(string s)
+        {
+            s = (s ?? "").Replace('\n', ' ');
+            return s.Length > 24 ? s.Substring(0, 24) + "…" : s;
+        }
+
+        // ------------------------------------------------------------------ files
+
+        void OpenFile()
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "BG sign (*.bgsign)|*.bgsign|All files|*.*", InitialDirectory = _settings.LastFolder ?? _settings.Folder };
+            if (dlg.ShowDialog(this) != true) return;
+            try
+            {
+                Snapshot();
+                Load(SignSerializer.Load(dlg.FileName), "Opened " + dlg.FileName, keepUndo: true);
+                _settings.LastFolder = Path.GetDirectoryName(dlg.FileName); _settings.Save();
+            }
+            catch (Exception ex) { MessageBox.Show(this, "Could not open that file: " + ex.Message, "Open"); }
+        }
+
+        void SaveFile()
+        {
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "BG sign (*.bgsign)|*.bgsign", FileName = SignExporter.SafeName(_doc.Name) + ".bgsign",
+                InitialDirectory = _settings.LastFolder ?? _settings.Folder,
+            };
+            if (dlg.ShowDialog(this) != true) return;
+            try
+            {
+                SignSerializer.Save(_doc, dlg.FileName);
+                _settings.LastFolder = Path.GetDirectoryName(dlg.FileName); _settings.Save();
+                _status.Text = "Saved " + dlg.FileName;
+            }
+            catch (Exception ex) { MessageBox.Show(this, "Could not save: " + ex.Message, "Save"); }
+        }
+
+        void ChooseExportFolder()
+        {
+            using (var dlg = new System.Windows.Forms.FolderBrowserDialog { Description = "Folder for the sign families (.rfa)", SelectedPath = _settings.Folder })
+                if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                {
+                    _settings.ExportFolder = dlg.SelectedPath; _settings.Save();
+                    _status.Text = "Families are saved in " + dlg.SelectedPath;
+                }
+        }
+
+        void ImportGraphic()
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog
+            {
+                Filter = "Drawings and artwork (*.dwg;*.dxf;*.ai;*.pdf)|*.dwg;*.dxf;*.ai;*.pdf|All files|*.*",
+                InitialDirectory = _settings.LastFolder ?? _settings.Folder,
+            };
+            if (dlg.ShowDialog(this) != true) return;
+            string path = dlg.FileName;
+            _settings.LastFolder = Path.GetDirectoryName(path); _settings.Save();
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+            if (ext == ".dwg" || ext == ".dxf")
+            {
+                _status.Text = "Reading " + Path.GetFileName(path) + " with Revit…";
+                RevitBridge.Instance.Run(app =>
+                {
+                    var g = DwgReader.Read(app.Application, path, out string note);
+                    Dispatcher.BeginInvoke(new Action(() => AddGraphic(g, note)));
+                });
+                return;
+            }
+            try
+            {
+                var paths = PdfVectorReader.Read(path);
+                if (paths.Count == 0) throw new InvalidDataException("No vector shapes were found. Convert text to outlines and embed linked artwork in Illustrator first.");
+                var g = GraphicElement.FromPaths(Path.GetFileNameWithoutExtension(path), Path.GetFileName(path), paths.Select(p => (p.Points, p.Closed)));
+                var strokes = paths.Where(p => p.StrokeMm > 0).Select(p => p.StrokeMm).OrderBy(x => x).ToList();
+                g.StrokeMm = strokes.Count > 0 ? Math.Round(strokes[strokes.Count / 2], 2) : 3;
+                AddGraphic(g, null);
+            }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, "Import graphic"); }
+        }
+
+        void AddGraphic(GraphicElement g, string note)
+        {
+            var r = _geometry?.PanelRect ?? new Core.Geometry.Rect2(0, 0, 1000, 400);
+            // Very large or tiny drawings are scaled to a sensible size; the scale stays editable.
+            if (g.NativeWidth > r.Width * 1.5 || g.NativeWidth < 5)
+                g.ScalePercent = Math.Round(r.Width * 0.3 / Math.Max(g.NativeWidth, 0.001) * 100, 2);
+            g.X = Math.Round(r.MinX + _doc.Panel.PaddingX);
+            g.Y = Math.Round(r.MinY + _doc.Panel.PaddingY);
+            Change(() => _doc.Graphics.Add(g));
+            Select(g.Id);
+            _status.Text = $"Imported {g.Name}: {g.Paths.Count(p => p.Closed)} closed shapes, {g.Paths.Count(p => !p.Closed)} lines." + (note != null ? " " + note : "");
+        }
+
+        // ------------------------------------------------------------------ export
+
+        void Export()
+        {
+            if (RevitBridge.Instance == null) { MessageBox.Show(this, "Restart the designer from the ribbon.", "Export"); return; }
+            var sign = SignSerializer.Clone(_doc);
+            string folder = _settings.Folder;
+            bool place = _placeAfter.IsChecked == true;
+            _status.Text = "Building the family in Revit…";
+            RevitBridge.Instance.Run(app =>
+            {
+                string msg;
+                try { msg = SignExporter.Export(app, sign, folder, place); }
+                catch (Exception ex) { msg = "Export failed: " + ex.Message; }
+                Dispatcher.BeginInvoke(new Action(() => _status.Text = msg.Split('\n')[0]));
+                if (!place || msg.StartsWith("Export failed")) TaskDialog.Show("BG Signage", msg);
+            });
+        }
+    }
+}

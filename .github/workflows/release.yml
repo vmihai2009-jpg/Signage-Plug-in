@@ -1,0 +1,76 @@
+name: Release
+
+# Publishes BGSignage-x.y.z.zip on the Releases page, which the Updater button in Revit downloads.
+# Push a tag such as v0.2.0, or run this workflow from the Actions tab and type a version such as v0.2.0.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version, e.g. v0.2.0'
+        required: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Version
+        id: v
+        shell: pwsh
+        run: |
+          $tag = '${{ inputs.version || github.ref_name }}'
+          $ver = $tag.TrimStart('v')
+          if ($ver -notmatch '^\d+\.\d+\.\d+$') { throw "Version must look like v1.2.3, not $tag" }
+          "tag=v$ver" >> $env:GITHUB_OUTPUT
+          "ver=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Build Revit 2024, 2025 and 2026
+        run: |
+          dotnet build BGSignage.sln -c Release-R2024 -p:EngineVersion=${{ steps.v.outputs.ver }}
+          dotnet build BGSignage.sln -c Release-R2025 -p:EngineVersion=${{ steps.v.outputs.ver }}
+          dotnet build BGSignage.sln -c Release-R2026 -p:EngineVersion=${{ steps.v.outputs.ver }}
+
+      # One zip: Install.bat, Uninstall.bat, Install.ps1 and an R<year> folder per Revit version.
+      - name: Package
+        shell: pwsh
+        run: |
+          $staging = 'staging/BGSignage'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Copy-Item installer/* $staging/
+          foreach ($pair in @(@('2024','net48'), @('2025','net8.0-windows'), @('2026','net8.0-windows'))) {
+            $year = $pair[0]; $fw = $pair[1]
+            $dest = "$staging/R$year"
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            Copy-Item "src/BGSignage.Launcher/bin/Release-R$year/$fw/BGSignage.Launcher.dll" $dest
+            Copy-Item "src/BGSignage.Engine/bin/Release-R$year/$fw/BGSignage.Engine.dll", "src/BGSignage.Engine/bin/Release-R$year/$fw/BGSignage.Engine.pdb" $dest
+          }
+          Compress-Archive -Path "$staging/*" -DestinationPath "BGSignage-${{ steps.v.outputs.ver }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BGSignage-${{ steps.v.outputs.ver }}
+          path: BGSignage-${{ steps.v.outputs.ver }}.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          files: BGSignage-${{ steps.v.outputs.ver }}.zip
+          generate_release_notes: true
+          body: |
+            ## Install (first time)
+            1. Download **BGSignage-${{ steps.v.outputs.ver }}.zip** below, right-click it, **Extract All**
+            2. Double-click **Install.bat** (your Windows user only, no admin rights needed)
+            3. Start Revit 2024, 2025 or 2026: **Sign Designer** is on the **Barr Gazetas** tab, **Signage** panel
+
+            ## Update (already installed)
+            In Revit click **Updater** on the Signage panel, then **Download and install**. No restart needed.

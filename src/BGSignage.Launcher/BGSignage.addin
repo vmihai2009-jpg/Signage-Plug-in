@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- For a manual install: copy this file to %AppData%\Autodesk\Revit\Addins\<year>\ and the build output
+     (BGSignage.Launcher.dll and BGSignage.Engine.dll) to %AppData%\Autodesk\Revit\Addins\<year>\BGSignage\.
+     Install.bat writes its own copy pointing at a versioned launcher folder. -->
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>BG Signage</Name>
+    <Assembly>BGSignage\BGSignage.Launcher.dll</Assembly>
+    <AddInId>7c1f3b2e-5a4d-4e8b-9f61-2d0b8a6c4e17</AddInId>
+    <FullClassName>BGSignage.Launcher.App</FullClassName>
+    <VendorId>BARRGAZETAS</VendorId>
+    <VendorDescription>Barr Gazetas</VendorDescription>
+  </AddIn>
+</RevitAddIns>

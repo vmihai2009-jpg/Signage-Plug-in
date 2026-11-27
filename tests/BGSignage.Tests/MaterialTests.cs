@@ -1,4 +1,5 @@
 using System.Linq;
+using BGSignage.Core.Geometry;
 using BGSignage.Core.Layout;
 using BGSignage.Core.Model;
 using Xunit;
@@ -47,10 +48,29 @@ namespace BGSignage.Tests
                 Assert.NotEmpty(small.Pieces);
                 s.ScalePercent = 200;
                 var big = SignBuilder.Build(d, new BoxFont());
-                var line = small.Pieces.First(p => p.Label.EndsWith("line"));
-                var line2 = big.Pieces.First(p => p.Label.EndsWith("line"));
-                Assert.Equal(line.Bounds.Width * 2, line2.Bounds.Width, 3);
+                Assert.Equal(small.ContentBounds.Width * 2, big.ContentBounds.Width, 2);
+                Assert.Equal(small.ContentBounds.Height * 2, big.ContentBounds.Height, 2);
             }
+        }
+
+        [Theory]
+        [InlineData("Person", 2)]       // head (a ring, with its hole) + body
+        [InlineData("Arrow right", 1)]
+        [InlineData("Stairs", 1)]
+        [InlineData("Toilets", 4)]      // two heads, two bodies
+        public void Symbols_come_out_as_merged_solid_shapes(string name, int shapes)
+        {
+            var d = new SignDocument();
+            d.Graphics.Add(Symbols.Create(name, 100));
+            var g = SignBuilder.Build(d.Normalise(), new BoxFont());
+            Assert.Equal(shapes, g.Pieces.Count);
+            // Merged shapes never overlap, so Revit shows no edges where strokes cross.
+            for (int i = 0; i < g.Pieces.Count; i++)
+                for (int j = i + 1; j < g.Pieces.Count; j++)
+                    Assert.False(Polygons.Contains(g.Pieces[j].Loops[0], g.Pieces[i].Loops[0][0]) && !g.Pieces[j].Loops.Skip(1).Any(h => Polygons.Contains(h, g.Pieces[i].Loops[0][0])),
+                        $"{name}: shape {i} lies inside shape {j}");
+            if (name == "Person")
+                Assert.Contains(g.Pieces, p => p.Loops.Count == 2); // the head keeps its hole
         }
     }
 }

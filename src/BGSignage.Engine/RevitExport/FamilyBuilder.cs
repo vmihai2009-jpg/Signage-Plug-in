@@ -309,9 +309,29 @@ namespace BGSignage.Engine.RevitExport
             if (existing != null) return existing.Id;
             // Same name as the project's material, so the project's own (with its render appearance) is used once loaded.
             var id = Material.Create(fam, name);
-            if (fam.GetElement(id) is Material mat && m != null) mat.Color = new Color(m.R, m.G, m.B);
+            if (fam.GetElement(id) is Material mat && m != null)
+            {
+                var colour = new Color(m.R, m.G, m.B);
+                mat.Color = colour;
+                // A solid surface fill in the same colour, so the sign reads filled (like the preview) in elevations
+                // and 3D views in Hidden Line, not only in Shaded. Change it in Manage > Materials > Graphics.
+                try
+                {
+                    var solid = SolidFill(fam);
+                    if (solid != ElementId.InvalidElementId)
+                    {
+                        mat.SurfaceForegroundPatternId = solid;
+                        mat.SurfaceForegroundPatternColor = colour;
+                    }
+                }
+                catch { /* keeps Revit's default graphics */ }
+            }
             return id;
         }
+
+        static ElementId SolidFill(Document doc) =>
+            new FilteredElementCollector(doc).OfClass(typeof(FillPatternElement)).Cast<FillPatternElement>()
+                .FirstOrDefault(f => f.GetFillPattern().IsSolidFill)?.Id ?? ElementId.InvalidElementId;
 
         /// <param name="k">Size factor: the outline is drawn through <paramref name="map"/> (which scales positions); radii scale here.</param>
         static CurveArrArray PanelProfile(BackPanel panel, Rect2 r, Func<Vec2, XYZ> map, bool faceBased, double k)

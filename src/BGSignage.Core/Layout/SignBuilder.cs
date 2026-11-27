@@ -91,32 +91,42 @@ namespace BGSignage.Core.Layout
             var t = GraphicTransform(e);
             var role = e.Material == MaterialSlot.Rules ? PieceRole.Rule : PieceRole.Letter;
             var closed = e.Paths.Where(p => p.Closed).Select(p => t.Apply(p.ToVec2())).Where(l => l.Length >= 3).ToList();
-            // Closed shapes nested inside others are holes (even-odd), as in a drawing's hatch or a logo.
-            foreach (var island in Islands(closed))
-                g.Pieces.Add(new Piece { Role = role, Material = e.Material, Label = e.Name, ElementId = e.Id, Loops = island });
-            if (e.StrokeMm > 0)
+            var open = e.Paths.Where(p => !p.Closed).Select(p => t.Apply(p.ToVec2())).ToList();
+            double w = e.StrokeMm <= 0 ? 0 : e.StrokeScales ? e.StrokeMm * Math.Max(e.ScalePercent, 0.01) / 100 : e.StrokeMm;
+            // Closed shapes nested inside others are holes (even-odd), as in a drawing's hatch or a logo. Lines are
+            // drawn with the line weight, then everything that touches is merged into one outline, so a line
+            // pictogram becomes one filled figure in Revit (no edges where the strokes cross or meet).
+            var islands = Islands(closed);
+            List<List<Vec2[]>> merged;
+            try { merged = Outlines.Merge(islands, open, w, e.StrokeScales); }
+            catch { merged = null; }
+            if (merged == null || (merged.Count == 0 && (islands.Count > 0 || (w > 0 && open.Count > 0))))
             {
-                double w = e.StrokeScales ? e.StrokeMm * Math.Max(e.ScalePercent, 0.01) / 100 : e.StrokeMm;
-                foreach (var path in e.Paths.Where(p => !p.Closed))
-                {
-                    var pts = t.Apply(path.ToVec2());
-                    for (int i = 0; i + 1 < pts.Length; i++)
-                    {
-                        var a = pts[i]; var b = pts[i + 1];
-                        double len = Vec2.Dist(a, b);
-                        if (len <= 1e-6) continue;
-                        if (e.StrokeScales)
-                        {
-                            // Square ends half a line weight long, so corners close up cleanly.
-                            var ext = (b - a) * (w / 2 / len);
-                            a = a - ext; b = b + ext;
-                        }
-                        g.Pieces.Add(new Piece { Role = role, Material = e.Material, Label = e.Name + " line", ElementId = e.Id, Loops = { Polygons.Bar(a, b, w) } });
-                    }
-                }
+                // Should not happen; fall back to the shapes as drawn rather than lose the graphic.
+                merged = islands;
+                if (w > 0) merged.AddRange(open.SelectMany(l => Bars(l, w, e.StrokeScales)).Select(b => new List<Vec2[]> { b }));
             }
+            foreach (var island in merged)
+                g.Pieces.Add(new Piece { Role = role, Material = e.Material, Label = e.Name, ElementId = e.Id, Loops = island });
             var box = t.Apply(Polygons.Rectangle(0, 0, Math.Max(e.NativeWidth, 1), Math.Max(e.NativeHeight, 1)));
             g.ElementBoxes[e.Id] = box;
+        }
+
+        /// <summary>One bar per segment of a polyline (the fallback when the outlines cannot be merged).</summary>
+        static IEnumerable<Vec2[]> Bars(Vec2[] pts, double w, bool squareEnds)
+        {
+            for (int i = 0; i + 1 < pts.Length; i++)
+            {
+                var a = pts[i]; var b = pts[i + 1];
+                double len = Vec2.Dist(a, b);
+                if (len <= 1e-6) continue;
+                if (squareEnds)
+                {
+                    var ext = (b - a) * (w / 2 / len);
+                    a = a - ext; b = b + ext;
+                }
+                yield return Polygons.Bar(a, b, w);
+            }
         }
 
         /// <summary>The two ends of a rule's centre line in sign coordinates (y down; angles anticlockwise).</summary>

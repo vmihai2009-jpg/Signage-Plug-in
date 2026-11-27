@@ -95,7 +95,8 @@ the top-left of the backpanel; a frame's Y is the top of the capitals of its fir
 
 **+ Symbol ▾** adds a line pictogram: toilets, male, female, accessible, baby change, people, person, lift, stairs,
 bicycle, bins, café and arrows. They behave like graphics (scale, rotate, mirror, material); the line weight
-scales with them.
+scales with them. In Revit each symbol is one solid shape (the lines are merged, so an elevation shows the
+pictogram's outline and fill, not every stroke), with its own `BG Material - <layer>` parameter.
 
 <img src="docs/symbols.png" width="600" alt="Symbols">
 
@@ -157,7 +158,9 @@ or save under a new name.
 Revit. Export again with the same family name to update every placed copy.
 
 Materials: pick a project material, or type a new name (the family creates it with the swatch colour; once loaded,
-a project material with the same name wins, so its render appearance is used).
+a project material with the same name wins, so its render appearance is used). A new material also gets a solid
+surface pattern in its colour, so letters, symbols and the panel read filled in Hidden Line elevations, not only in
+Shaded. For a material that already exists in the project, set that in **Manage → Materials → Graphics → Surface Pattern**.
 
 ---
 
